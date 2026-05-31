@@ -217,7 +217,7 @@
     <div class="stat-card">
       <div class="label">Posiciones</div>
       <div class="value" id="openPositions">0</div>
-      <div class="sub">abiertas</div>
+      <div class="sub" id="posSub">abiertas</div>
     </div>
     <div class="stat-card">
       <div class="label">Analizados Hoy</div>
@@ -308,7 +308,12 @@ function updateStatus(s) {
   if (!s) return;
   solPriceEur = s.sol_price_eur || 0;
   document.getElementById('balanceEur').textContent = '€' + (s.eur_balance||0).toFixed(2);
-  document.getElementById('balanceSol').textContent = (s.sol_balance||0).toFixed(4) + ' SOL';
+  document.getElementById('balanceSol').textContent = `Libre €${(s.free_eur||0).toFixed(2)} · Invertido €${(s.invested_eur||0).toFixed(2)}`;
+  const posSub = document.getElementById('posSub');
+  if (posSub) {
+    const u = s.unrealized_pnl_eur || 0;
+    posSub.textContent = (s.open_positions? `${u>=0?'+':''}€${u.toFixed(2)} sin realizar` : 'abiertas');
+  }
   const pnl = s.total_pnl_sol || 0;
   const pnlEl = document.getElementById('totalPnl');
   pnlEl.textContent = (pnl>=0?'+':'') + pnl.toFixed(4) + ' SOL';
@@ -376,8 +381,9 @@ function scoreColor(score) {
 
 function addToken(d) {
   if (d.status === 'analyzing') return;
+  tokensShown = tokensShown.filter(t => t.address !== d.address);  // evita duplicados
   tokensShown.unshift(d);
-  tokensShown = tokensShown.slice(0, 25);
+  tokensShown = tokensShown.slice(0, 50);
   renderTokens();
 }
 
@@ -420,6 +426,7 @@ function renderPositions(positions) {
       <div class="position-meta">
         <span>Entrada: $${(p.buy_price_usd||0).toPrecision(4)}</span>
         <span>${(p.amount_sol||0).toFixed(3)} SOL</span>
+        <span>⏱ ${timeAgo(p.buy_time)}</span>
         <button class="close-btn" onclick="closePosition(${p.id})">Cerrar</button>
       </div>
       <div class="progress-bar"><div class="progress-fill" style="width:${prog}%"></div></div>
@@ -441,7 +448,7 @@ function renderTrades(trades) {
   c.innerHTML = trades.map(t => {
     const pnl = t.pnl_pct || 0;
     return `<div class="trade-row">
-      <div><div class="tname">${escapeHtml(t.token_symbol||'?')}</div><div style="color:var(--muted);font-size:11px">${reasonLabel(t.outcome)}</div></div>
+      <div><div class="tname">${escapeHtml(t.token_symbol||'?')}</div><div style="color:var(--muted);font-size:11px">${reasonLabel(t.outcome)} · ${timeAgo(t.sell_time)}</div></div>
       <div style="text-align:right"><div class="${pnl>=0?'value green':'value red'}" style="font-size:14px">${pnl>=0?'+':''}${pnl.toFixed(1)}%</div>
       <div style="color:var(--muted);font-size:11px">${(t.pnl_sol||0).toFixed(4)} SOL</div></div>
     </div>`;
@@ -683,6 +690,20 @@ async function closePosition(id) {
 
 function escapeHtml(s){ return String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
 
+function timeAgo(ts) {
+  if (!ts) return '';
+  const d = new Date(String(ts).replace(' ','T') + 'Z');  // el servidor guarda en UTC
+  let s = (Date.now() - d.getTime()) / 1000;
+  if (isNaN(s)) return '';
+  if (s < 0) s = 0;
+  if (s < 60) return 'hace ' + Math.floor(s) + 's';
+  if (s < 3600) return 'hace ' + Math.floor(s/60) + 'min';
+  if (s < 86400) return 'hace ' + Math.floor(s/3600) + 'h';
+  if (s < 2592000) return 'hace ' + Math.floor(s/86400) + 'd';
+  if (s < 31536000) return 'hace ' + Math.floor(s/2592000) + ' meses';
+  return 'hace ' + Math.floor(s/31536000) + ' años';
+}
+
 function catBadge(cat) {
   const labels = {trending:'🔥 Trend', top:'⭐ Top', new:'🆕 New'};
   if (!cat || !labels[cat]) return '';
@@ -702,9 +723,12 @@ function coinAvatar(url, symbol, size) {
 connect();
 loadSolMarket();
 setInterval(async()=>{
-  updateStatus(await (await fetch('/api/status')).json());
-  if (activeTab==='solmarket') loadSolMarket();
-}, 10000);
+  try {
+    updateStatus(await (await fetch('/api/status')).json());
+    loadPositions();
+    if (activeTab==='solmarket') loadSolMarket();
+  } catch(e) {}
+}, 5000);
 </script>
 </body>
 </html>

@@ -72,8 +72,9 @@ class BotEngine:
                 pass
         return self.sol_price_usd, self.sol_price_eur
 
-    async def _get_balance_sol(self) -> float:
-        """Balance en SOL: real (wallet) en modo live, o virtual (50€ + P&L) en paper."""
+    async def _get_free_sol(self) -> float:
+        """SOL LIBRE (disponible para comprar). Real: balance real de la wallet.
+        Paper: 50€ iniciales + P&L realizado - lo comprometido en posiciones abiertas."""
         if config.ENABLE_TRADING:
             if not config.PRIVATE_KEY:
                 return 0.0
@@ -81,7 +82,6 @@ class BotEngine:
                 return await wallet.get_sol_balance()
             except Exception:
                 return 0.0
-        # Modo PAPER: 50€ iniciales (en SOL) + P&L acumulado de las operaciones simuladas
         _, sol_eur = await self.get_sol_prices()
         start = db.get_state("paper_start_sol", "")
         if start:
@@ -90,21 +90,39 @@ class BotEngine:
             start_sol = (config.PAPER_START_EUR / sol_eur) if sol_eur > 0 else 0.0
             if start_sol > 0:
                 db.set_state("paper_start_sol", str(start_sol))
-        return max(0.0, start_sol + db.get_total_pnl())
+        committed = sum(p.get("amount_sol", 0) for p in db.get_open_positions())
+        return max(0.0, start_sol + db.get_total_pnl() - committed)
 
     async def get_status(self) -> dict:
         sol_usd, sol_eur = await self.get_sol_prices()
-        sol_balance = await self._get_balance_sol()
+        free_sol = await self._get_free_sol()
 
         positions = db.get_open_positions()
         trades = db.get_trades(100)
         wins = sum(1 for t in trades if t.get("pnl_sol", 0) > 0)
 
+        # Valor actual de las posiciones abiertas + P&L no realizado (a precio de mercado)
+        invested = 0.0
+        unrealized = 0.0
+        for p in positions:
+            bp = p.get("buy_price_usd") or 0
+            cp = p.get("current_price_usd") or bp
+            cur_val = p["amount_sol"] * (cp / bp) if bp > 0 else p.get("amount_sol", 0)
+            invested += cur_val
+            unrealized += cur_val - p.get("amount_sol", 0)
+        equity = free_sol + invested  # patrimonio total
+
         return {
             "running": self.running,
             "mode": "live" if config.ENABLE_TRADING else "paper",
-            "sol_balance": round(sol_balance, 4),
-            "eur_balance": round(sol_balance * sol_eur, 2),
+            "sol_balance": round(equity, 4),
+            "eur_balance": round(equity * sol_eur, 2),
+            "free_sol": round(free_sol, 4),
+            "free_eur": round(free_sol * sol_eur, 2),
+            "invested_sol": round(invested, 4),
+            "invested_eur": round(invested * sol_eur, 2),
+            "unrealized_pnl_sol": round(unrealized, 4),
+            "unrealized_pnl_eur": round(unrealized * sol_eur, 2),
             "sol_price_eur": round(sol_eur, 2),
             "sol_price_usd": round(sol_usd, 2),
             "total_pnl_sol": round(db.get_total_pnl(), 4),
@@ -131,7 +149,7 @@ class BotEngine:
 
         # Check daily loss limit
         daily_pnl = db.get_daily_pnl()
-        sol_bal = await self._get_balance_sol()
+        sol_bal = await self._get_free_sol()
         if daily_pnl < -(sol_bal * config.MAX_DAILY_LOSS_PCT):
             await self.broadcast_log("WARNING", "Limite de perdida diaria alcanzado - trading pausado")
             return
@@ -418,7 +436,7 @@ class BotEngine:
 
         # Mercado bajista y estamos en SOL -> proteger en USDC
         if state == "risk_on" and score <= config.SOL_SWING_EXIT_SCORE:
-            sol_bal = await self._get_balance_sol()
+            sol_bal = await self._get_free_sol()
             amt = round(sol_bal * config.SOL_SWING_PCT, 4)
             if amt <= 0:
                 return
