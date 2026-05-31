@@ -1,0 +1,18 @@
+[Unit]
+Description=Solana Trading Bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=botuser
+WorkingDirectory=/home/botuser/solana-bot
+# Carga las variables del .env
+EnvironmentFile=/home/botuser/solana-bot/.env
+ExecStart=/home/botuser/solana-bot/venv/bin/python -m uvicorn main:app --host 127.0.0.1 --port 8000
+Restart=always
+RestartSec=5
+# Reinicia si se cuelga; vigila posiciones 24/7
+
+[Install]
+WantedBy=multi-user.target
