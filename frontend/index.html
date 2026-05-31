@@ -516,7 +516,13 @@ async function loadSettings() {
   c.innerHTML = `
     <div style="display:flex;flex-direction:column;gap:16px">
       <div>
-        <label class="set-label">🤖 Modelo de IA (Claude)</label>
+        <label class="set-label">🤖 Proveedores de IA</label>
+        <label style="font-weight:400;display:block;margin-bottom:5px"><input type="checkbox" id="setUseGemini" ${s.use_gemini?'checked':''}> Gemini (GRATIS) ${s.has_gemini_key?'':'<span style="color:var(--yellow)">⚠ falta key</span>'}</label>
+        <label style="font-weight:400;display:block"><input type="checkbox" id="setUseClaude" ${s.use_claude?'checked':''}> Claude (de pago) ${s.has_claude_key?'':'<span style="color:var(--yellow)">⚠ falta key</span>'}</label>
+        <div style="font-size:11px;color:var(--muted);margin-top:5px">Si activas ambos: Claude primero, Gemini de respaldo. Si ninguno: solo el algoritmo (gratis, también seguro).</div>
+      </div>
+      <div>
+        <label class="set-label">Modelo de Claude <span style="color:var(--muted);font-size:11px">· solo si Claude está activo</span></label>
         <select id="setModel" class="set-input">
           ${opt(s.llm_model,'claude-haiku-4-5','Haiku — rápido y barato (~$0.002/análisis)')}
           ${opt(s.llm_model,'claude-sonnet-4-6','Sonnet — equilibrado (recomendado)')}
@@ -557,6 +563,8 @@ async function saveSettings() {
     llm_effort: document.getElementById('setEffort').value,
     risk_mode: document.getElementById('setRisk').value,
     websearch: document.getElementById('setWeb').checked,
+    use_claude: document.getElementById('setUseClaude').checked,
+    use_gemini: document.getElementById('setUseGemini').checked,
   };
   const msg = document.getElementById('setMsg');
   msg.textContent = 'Guardando...'; msg.style.color = 'var(--muted)';

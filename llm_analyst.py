@@ -97,11 +97,11 @@ _client: Optional[object] = None
 
 
 def _claude_available() -> bool:
-    return ANTHROPIC_AVAILABLE and bool(config.ANTHROPIC_API_KEY)
+    return config.LLM_USE_CLAUDE and ANTHROPIC_AVAILABLE and bool(config.ANTHROPIC_API_KEY)
 
 
 def _gemini_available() -> bool:
-    return bool(config.GEMINI_API_KEY)
+    return config.LLM_USE_GEMINI and bool(config.GEMINI_API_KEY)
 
 
 def is_enabled() -> bool:
@@ -115,7 +115,7 @@ def provider_label() -> str:
         parts.append(f"Claude ({config.LLM_MODEL})")
     if _gemini_available():
         parts.append("Gemini gratis" + (" (respaldo)" if _claude_available() else ""))
-    return " + ".join(parts) if parts else "ninguno"
+    return " + ".join(parts) if parts else "ninguno (solo algoritmo)"
 
 
 def _supports_thinking(model: str) -> bool:

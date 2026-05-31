@@ -142,7 +142,7 @@ class BotEngine:
 
         # ── SEGUNDO FILTRO: razonamiento LLM (Claude) ──────────────────────
         if llm_analyst.is_enabled():
-            await self.broadcast_log("INFO", f"Consultando a Claude sobre {analysis.symbol}...")
+            await self.broadcast_log("INFO", f"Consultando a la IA sobre {analysis.symbol}...")
             verdict = await llm_analyst.llm_review(analysis, self._sync_log)
             if verdict:
                 decision = verdict["decision"]
@@ -150,23 +150,23 @@ class BotEngine:
                 reasoning = verdict["reasoning"]
                 risks = verdict.get("key_risks", [])
 
-                # Un solo mensaje (persistido) con el veredicto de Claude
+                # Un solo mensaje (persistido) con el veredicto de la IA
                 if decision == "veto":
                     risks_txt = f" · Riesgos: {', '.join(risks[:3])}" if risks else ""
                     await self.broadcast_log(
                         "WARNING",
-                        f"🧠⛔ Claude VETÓ {analysis.symbol} ({conf}%): {reasoning}{risks_txt}"
+                        f"🧠⛔ La IA VETÓ {analysis.symbol} ({conf}%): {reasoning}{risks_txt}"
                     )
                     return
                 if conf < config.LLM_MIN_CONFIDENCE:
                     await self.broadcast_log(
                         "INFO",
-                        f"🧠 Claude aprobó {analysis.symbol} pero con confianza baja ({conf}% < {config.LLM_MIN_CONFIDENCE:.0f}%) - omitido"
+                        f"🧠 La IA aprobó {analysis.symbol} pero con confianza baja ({conf}% < {config.LLM_MIN_CONFIDENCE:.0f}%) - omitido"
                     )
                     return
                 await self.broadcast_log(
                     "TRADE",
-                    f"🧠✅ Claude confirmó {analysis.symbol} ({conf}%): {reasoning}"
+                    f"🧠✅ La IA confirmó {analysis.symbol} ({conf}%): {reasoning}"
                 )
 
         trade_sol = calculate_position_size(sol_bal)
@@ -705,6 +705,10 @@ async def get_settings():
         "risk_mode": config.RISK_MODE,
         "llm_enabled": config.ENABLE_LLM_REVIEW,
         "websearch": config.ENABLE_LLM_WEBSEARCH,
+        "use_claude": config.LLM_USE_CLAUDE,
+        "use_gemini": config.LLM_USE_GEMINI,
+        "has_claude_key": bool(config.ANTHROPIC_API_KEY),
+        "has_gemini_key": bool(config.GEMINI_API_KEY),
     }
 
 
@@ -722,6 +726,12 @@ async def update_settings(data: dict):
     if "websearch" in data:
         config.ENABLE_LLM_WEBSEARCH = bool(data["websearch"])
         _persist_env("ENABLE_LLM_WEBSEARCH", "true" if config.ENABLE_LLM_WEBSEARCH else "false")
+    if "use_claude" in data:
+        config.LLM_USE_CLAUDE = bool(data["use_claude"])
+        _persist_env("LLM_USE_CLAUDE", "true" if config.LLM_USE_CLAUDE else "false")
+    if "use_gemini" in data:
+        config.LLM_USE_GEMINI = bool(data["use_gemini"])
+        _persist_env("LLM_USE_GEMINI", "true" if config.LLM_USE_GEMINI else "false")
     if "llm_enabled" in data:
         config.ENABLE_LLM_REVIEW = bool(data["llm_enabled"])
         _persist_env("ENABLE_LLM_REVIEW", "true" if config.ENABLE_LLM_REVIEW else "false")
