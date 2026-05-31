@@ -15,12 +15,28 @@ Dos modos:
 Modelo configurable via LLM_MODEL en .env. Devuelve veredicto razonado.
 """
 
+import asyncio
 import json
 import re
+import time
 from typing import Optional, Dict, Any
 
 import httpx
 import config
+
+# Control de ritmo para Gemini (capa gratuita ~10-15 peticiones/min)
+_gemini_lock = asyncio.Lock()
+_gemini_last = [0.0]
+GEMINI_MIN_INTERVAL = 6.0  # segundos minimos entre llamadas a Gemini
+
+
+async def _throttle_gemini():
+    """Serializa y espacia las llamadas a Gemini para no exceder su limite gratuito."""
+    async with _gemini_lock:
+        wait = GEMINI_MIN_INTERVAL - (time.monotonic() - _gemini_last[0])
+        if wait > 0:
+            await asyncio.sleep(wait)
+        _gemini_last[0] = time.monotonic()
 
 try:
     from anthropic import AsyncAnthropic
@@ -395,6 +411,7 @@ async def _gemini_review(user_msg: str, log_fn) -> Optional[Dict]:
         "generationConfig": {"temperature": 0.4, "maxOutputTokens": 2048},
     }
     try:
+        await _throttle_gemini()
         async with httpx.AsyncClient(timeout=40) as client:
             r = await client.post(url, json=body)
         if r.status_code != 200:
@@ -503,6 +520,7 @@ async def _ask_llm(system_prompt: str, user_msg: str, log_fn, max_tokens: int = 
             "generationConfig": {"temperature": 0.5, "maxOutputTokens": max_tokens},
         }
         try:
+            await _throttle_gemini()
             async with httpx.AsyncClient(timeout=45) as client:
                 r = await client.post(url, json=body)
             if r.status_code == 200:
