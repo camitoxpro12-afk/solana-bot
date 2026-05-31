@@ -151,6 +151,32 @@
   .tab.active { background: var(--blue); color: #fff; }
   .set-label { display: block; font-size: 13px; font-weight: 600; margin-bottom: 6px; }
   .set-input { width: 100%; padding: 9px 10px; border-radius: 8px; background: var(--panel2); color: var(--text); border: 1px solid var(--border); font-family: inherit; font-size: 13px; }
+
+  /* ===== MOVIL ===== */
+  @media (max-width: 640px) {
+    body { font-size: 13px; }
+    .header { flex-wrap: wrap; padding: 12px 14px; gap: 10px; }
+    .logo { font-size: 17px; gap: 8px; }
+    .controls { gap: 8px; flex-wrap: wrap; justify-content: flex-start; }
+    .controls #walletInfo { width: 100%; order: -1; }
+    button { padding: 10px 16px; font-size: 13px; }
+    .btn-start, .btn-stop { flex: 1; }
+    .container { padding: 12px; }
+    .stats-grid { grid-template-columns: repeat(2, 1fr); gap: 10px; margin-bottom: 16px; }
+    .stat-card { padding: 13px; }
+    .stat-card .value { font-size: 19px; }
+    .stat-card .label { font-size: 10px; }
+    .main-grid { gap: 14px; }
+    .panel { padding: 14px; margin-bottom: 14px; }
+    .tabs { overflow-x: auto; gap: 6px; padding-bottom: 4px; -webkit-overflow-scrolling: touch; }
+    .tab { flex-shrink: 0; padding: 8px 12px; font-size: 12px; white-space: nowrap; }
+    .log-container { height: 240px; font-size: 11px; }
+    .lbar .lname { width: 92px; }
+    .token-row { gap: 8px; padding: 10px; }
+    .score-circle { width: 38px; height: 38px; font-size: 13px; border-width: 2px; }
+    .position-name { font-size: 14px; }
+    .position-pnl { font-size: 16px; }
+  }
 </style>
 </head>
 <body>
