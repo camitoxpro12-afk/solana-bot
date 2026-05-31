@@ -501,18 +501,22 @@ class BotEngine:
                 f"Swing de SOL ACTIVO ({config.SOL_SWING_PCT*100:.0f}% del balance) - estado: {estado}"
             )
 
-        if config.PRIVATE_KEY:
+        # Wallet: obligatoria solo en modo REAL; en simulacion es opcional.
+        pk = (config.PRIVATE_KEY or "").strip()
+        if pk and pk != "TU_CLAVE_PRIVADA_AQUI":
             try:
                 wallet.load_keypair()
                 pub = wallet.get_public_key_str()
                 bal = await wallet.get_sol_balance()
                 await self.broadcast_log("INFO", f"Wallet: {pub[:8]}...{pub[-4:]} | Balance: {bal:.4f} SOL")
             except Exception as e:
-                await self.broadcast_log("ERROR", f"Error cargando wallet: {e}")
-                self.running = False
-                return
+                if config.ENABLE_TRADING:
+                    await self.broadcast_log("ERROR", f"Clave de wallet invalida ({e}) - no se puede operar en REAL")
+                    self.running = False
+                    return
+                await self.broadcast_log("WARNING", "Clave de wallet invalida - sigo en SIMULACION")
         else:
-            await self.broadcast_log("WARNING", "Sin PRIVATE_KEY configurada - modo paper")
+            await self.broadcast_log("INFO", "Modo simulacion (sin wallet real)")
 
         loop = asyncio.get_event_loop()
         self.tasks = [
