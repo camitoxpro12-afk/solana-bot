@@ -279,7 +279,8 @@ const REASON_LABELS = {
 function reasonLabel(r) { return REASON_LABELS[r] || r || ''; }
 
 function connect() {
-  ws = new WebSocket(`ws://${location.host}/ws`);
+  const proto = location.protocol === 'https:' ? 'wss://' : 'ws://';
+  ws = new WebSocket(`${proto}${location.host}/ws`);
   ws.onmessage = (e) => handleMessage(JSON.parse(e.data));
   ws.onclose = () => setTimeout(connect, 2000);
 }
@@ -637,8 +638,14 @@ async function loadSolMarket() {
   `;
 }
 
-async function startBot() { await fetch('/api/start',{method:'POST'}); }
-async function stopBot() { await fetch('/api/stop',{method:'POST'}); }
+async function startBot() {
+  await fetch('/api/start',{method:'POST'});
+  setTimeout(async()=>{ updateStatus(await (await fetch('/api/status')).json()); }, 500);
+}
+async function stopBot() {
+  await fetch('/api/stop',{method:'POST'});
+  setTimeout(async()=>{ updateStatus(await (await fetch('/api/status')).json()); }, 500);
+}
 async function closePosition(id) {
   if(confirm('¿Cerrar esta posición manualmente?')) {
     await fetch(`/api/positions/${id}/close`,{method:'POST'});
