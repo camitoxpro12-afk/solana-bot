@@ -471,9 +471,9 @@ class BotEngine:
 
         if llm_analyst.is_enabled():
             ws_note = " + busqueda web" if config.ENABLE_LLM_WEBSEARCH else ""
-            await self.broadcast_log("INFO", f"Filtro LLM ACTIVO ({config.LLM_MODEL}{ws_note}) - Claude revisara cada candidato")
+            await self.broadcast_log("INFO", f"Filtro LLM ACTIVO: {llm_analyst.provider_label()}{ws_note}")
         else:
-            await self.broadcast_log("INFO", "Filtro LLM desactivado - solo analisis algoritmico")
+            await self.broadcast_log("INFO", "Filtro LLM desactivado - solo analisis algoritmico (gratis)")
 
         # Resumen de la estrategia de salida y protecciones
         exit_parts = []

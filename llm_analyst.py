@@ -19,6 +19,7 @@ import json
 import re
 from typing import Optional, Dict, Any
 
+import httpx
 import config
 
 try:
@@ -95,12 +96,26 @@ WEB_SEARCH_TOOL = {"type": "web_search_20260209", "name": "web_search", "max_use
 _client: Optional[object] = None
 
 
+def _claude_available() -> bool:
+    return ANTHROPIC_AVAILABLE and bool(config.ANTHROPIC_API_KEY)
+
+
+def _gemini_available() -> bool:
+    return bool(config.GEMINI_API_KEY)
+
+
 def is_enabled() -> bool:
-    return (
-        ANTHROPIC_AVAILABLE
-        and config.ENABLE_LLM_REVIEW
-        and bool(config.ANTHROPIC_API_KEY)
-    )
+    """Activo si el filtro LLM esta on y hay AL MENOS un proveedor (Claude o Gemini)."""
+    return config.ENABLE_LLM_REVIEW and (_claude_available() or _gemini_available())
+
+
+def provider_label() -> str:
+    parts = []
+    if _claude_available():
+        parts.append(f"Claude ({config.LLM_MODEL})")
+    if _gemini_available():
+        parts.append("Gemini gratis" + (" (respaldo)" if _claude_available() else ""))
+    return " + ".join(parts) if parts else "ninguno"
 
 
 def _supports_thinking(model: str) -> bool:
@@ -369,34 +384,70 @@ async def sol_market_read(m: Dict[str, Any], log_fn=None) -> Optional[Dict[str, 
     return data
 
 
+async def _gemini_review(user_msg: str, log_fn) -> Optional[Dict]:
+    """IA GRATIS (Google Gemini) via REST. Devuelve el dict del veredicto o None."""
+    url = (f"https://generativelanguage.googleapis.com/v1beta/models/"
+           f"{config.GEMINI_MODEL}:generateContent?key={config.GEMINI_API_KEY}")
+    body = {
+        "system_instruction": {"parts": [{"text": _build_system_prompt()}]},
+        "contents": [{"role": "user", "parts": [{"text": user_msg}]}],
+        "generationConfig": {"temperature": 0.4, "maxOutputTokens": 800},
+    }
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            r = await client.post(url, json=body)
+        if r.status_code != 200:
+            log_fn("WARNING", f"Gemini error {r.status_code} - se omite el filtro LLM")
+            return None
+        data = r.json()
+        cands = data.get("candidates", [])
+        if not cands:
+            return None
+        parts = cands[0].get("content", {}).get("parts", [])
+        text = " ".join(p.get("text", "") for p in parts)
+        if not text:
+            return None
+        log_fn("INFO", "LLM: Gemini (gratis) respondio")
+        return _extract_verdict_json(text)
+    except Exception as e:
+        log_fn("WARNING", f"Gemini fallo: {e}")
+        return None
+
+
 async def llm_review(analysis, log_fn=None) -> Optional[Dict[str, Any]]:
     """
-    Pide a Claude un veredicto razonado. Devuelve dict {decision, confidence,
-    key_risks, reasoning} o None (fail-open) si esta desactivado o la API falla.
+    Veredicto razonado. Intenta Claude (si hay key y saldo); si falla o no hay,
+    usa Gemini (gratis). Si ninguno responde -> None (el bot sigue con el algoritmo).
     """
-    if not is_enabled():
+    if not config.ENABLE_LLM_REVIEW:
         return None
     if log_fn is None:
         def log_fn(level, msg):
             pass
 
-    client = _get_client()
-    model = config.LLM_MODEL
     user_msg = _build_user_message(analysis)
 
-    try:
-        if config.ENABLE_LLM_WEBSEARCH:
-            data = await _review_websearch(client, user_msg, model, log_fn)
-        else:
-            data = await _review_structured(client, user_msg, model, log_fn)
-    except _anthropic.APIStatusError as e:
-        log_fn("WARNING", f"LLM error API ({e.status_code}): se omite el filtro LLM")
-        return None
-    except Exception as e:
-        log_fn("WARNING", f"LLM error: {e} - se omite el filtro LLM")
-        return None
+    # 1) Claude (de pago) si hay key
+    if _claude_available():
+        try:
+            client = _get_client()
+            model = config.LLM_MODEL
+            if config.ENABLE_LLM_WEBSEARCH:
+                data = await _review_websearch(client, user_msg, model, log_fn)
+            else:
+                data = await _review_structured(client, user_msg, model, log_fn)
+            if data:
+                return _sanitize(data)
+            log_fn("WARNING", "Claude no dio veredicto" + (" - probando Gemini gratis" if _gemini_available() else ""))
+        except _anthropic.APIStatusError as e:
+            log_fn("WARNING", f"Claude error API ({e.status_code})" + (" - probando Gemini gratis" if _gemini_available() else ""))
+        except Exception as e:
+            log_fn("WARNING", f"Claude fallo ({e})" + (" - probando Gemini gratis" if _gemini_available() else ""))
 
-    if data is None:
-        log_fn("WARNING", "LLM no devolvio un veredicto parseable - se omite")
-        return None
-    return _sanitize(data)
+    # 2) Gemini (GRATIS) como alternativa / respaldo
+    if _gemini_available():
+        data = await _gemini_review(user_msg, log_fn)
+        if data:
+            return _sanitize(data)
+
+    return None

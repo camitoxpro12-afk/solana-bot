@@ -49,6 +49,10 @@ LLM_EFFORT = os.getenv("LLM_EFFORT", "medium")  # low | medium | high | max (sol
 ENABLE_LLM_THINKING = os.getenv("ENABLE_LLM_THINKING", "true").lower() == "true"
 # Busqueda web para Claude (mas informado pero mas lento y con coste ~$0.01/busqueda)
 ENABLE_LLM_WEBSEARCH = os.getenv("ENABLE_LLM_WEBSEARCH", "false").lower() == "true"
+# IA GRATIS de respaldo (Google Gemini): se usa si Claude falla/se acaba el saldo.
+# Consigue una key gratis en https://aistudio.google.com/apikey
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
 
 # Intervals (seconds)
 SCAN_INTERVAL = int(os.getenv("SCAN_INTERVAL", "30"))
