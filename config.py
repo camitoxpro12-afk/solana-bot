@@ -59,7 +59,7 @@ LLM_USE_GEMINI = os.getenv("LLM_USE_GEMINI", "true").lower() == "true"   # Gemin
 
 # Intervals (seconds)
 SCAN_INTERVAL = int(os.getenv("SCAN_INTERVAL", "30"))
-PRICE_CHECK_INTERVAL = int(os.getenv("PRICE_CHECK_INTERVAL", "15"))
+PRICE_CHECK_INTERVAL = int(os.getenv("PRICE_CHECK_INTERVAL", "8"))
 NEWS_INTERVAL = int(os.getenv("NEWS_INTERVAL", "120"))
 PRICE_CACHE_SECONDS = 300  # Cache SOL/EUR price 5 min
 
