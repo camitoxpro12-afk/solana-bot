@@ -617,12 +617,17 @@ async function loadSolMarket() {
   if (d.swing_enabled) {
     const ro = d.swing_state === 'risk_off';
     const sc = ro ? 'var(--yellow)' : 'var(--green)';
-    swing = `<div style="display:flex;align-items:center;gap:8px;background:var(--panel2);border-radius:8px;padding:10px 12px;margin-bottom:12px;border-left:3px solid ${sc}">
-      <span style="font-size:18px">${ro?'🛡️':'🟢'}</span>
-      <div style="flex:1">
-        <div style="font-size:12px;color:var(--muted)">Estrategia SOL (${Math.round((d.swing_pct||0)*100)}% del balance)</div>
-        <div style="font-weight:600;color:${sc}">${ro?`Protegido en USDC · $${(d.swing_usdc||0).toFixed(2)} en cash`:'En SOL (risk-on)'}</div>
+    const sp = d.swing_pnl_sol || 0;
+    const spc = sp >= 0 ? 'var(--green)' : 'var(--red)';
+    swing = `<div style="background:var(--panel2);border-radius:8px;padding:10px 12px;margin-bottom:12px;border-left:3px solid ${sc}">
+      <div style="display:flex;align-items:center;gap:8px">
+        <span style="font-size:18px">${ro?'🛡️':'🟢'}</span>
+        <div style="flex:1">
+          <div style="font-size:12px;color:var(--muted)">🔄 Trading de SOL (swing · ${Math.round((d.swing_pct||0)*100)}% del balance)</div>
+          <div style="font-weight:600;color:${sc}">${ro?`Protegido en USDC (${(d.swing_protected_sol||0).toFixed(3)} SOL → $${(d.swing_usdc||0).toFixed(2)})`:'Manteniendo SOL (risk-on)'}</div>
+        </div>
       </div>
+      <div style="font-size:12px;color:var(--muted);margin-top:6px">Operaciones de SOL completadas: <b style="color:var(--text)">${d.swing_trades||0}</b> · Resultado: <b style="color:${spc}">${sp>=0?'+':''}${sp.toFixed(4)} SOL (€${(d.swing_pnl_eur||0).toFixed(2)})</b></div>
     </div>`;
   }
   const llm = '<div id="solExpert"><div class="empty" style="padding:14px">🧠 Generando análisis experto de Solana (puede tardar la primera vez)...</div></div>';

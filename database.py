@@ -301,6 +301,15 @@ def get_total_pnl() -> float:
     return row[0] if row else 0.0
 
 
+def get_swing_stats() -> Dict:
+    """Estadisticas de las operaciones de swing de SOL (rotaciones SOL<->USDC completadas)."""
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT COUNT(*), COALESCE(SUM(pnl_sol), 0) FROM trades WHERE outcome = 'sol_swing'"
+        ).fetchone()
+    return {"count": row[0] or 0, "pnl_sol": round(row[1] or 0.0, 4)}
+
+
 # ── Tokens seen ───────────────────────────────────────────────────────────────
 
 def mark_token_seen(address: str, name: str, symbol: str,

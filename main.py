@@ -669,7 +669,12 @@ async def get_sol_market_endpoint():
     data["swing_enabled"] = config.ENABLE_SOL_SWING
     data["swing_state"] = db.get_state("sol_swing_state", "risk_on")
     data["swing_usdc"] = float(db.get_state("sol_swing_usdc", "0") or 0)
+    data["swing_protected_sol"] = float(db.get_state("sol_swing_sol_parked", "0") or 0) if data["swing_state"] == "risk_off" else 0.0
     data["swing_pct"] = config.SOL_SWING_PCT
+    swing = db.get_swing_stats()
+    data["swing_trades"] = swing["count"]
+    data["swing_pnl_sol"] = swing["pnl_sol"]
+    data["swing_pnl_eur"] = round(swing["pnl_sol"] * data.get("price_eur", 0), 2)
     return data
 
 
