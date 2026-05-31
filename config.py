@@ -98,9 +98,9 @@ SOL_SWING_ENTER_SCORE = float(os.getenv("SOL_SWING_ENTER_SCORE", "55"))  # vuelv
 SOL_SWING_EXIT_SCORE = float(os.getenv("SOL_SWING_EXIT_SCORE", "35"))    # protege en USDC si senal <=
 SOL_SWING_INTERVAL = int(os.getenv("SOL_SWING_INTERVAL", "600"))         # revisa cada 10 min
 
-# Jupiter V6 API
-JUPITER_QUOTE_URL = "https://quote-api.jup.ag/v6/quote"
-JUPITER_SWAP_URL = "https://quote-api.jup.ag/v6/swap"
+# Jupiter API (lite-api = gratis, sin key). La vieja quote-api.jup.ag fue retirada.
+JUPITER_QUOTE_URL = os.getenv("JUPITER_QUOTE_URL", "https://lite-api.jup.ag/swap/v1/quote")
+JUPITER_SWAP_URL = os.getenv("JUPITER_SWAP_URL", "https://lite-api.jup.ag/swap/v1/swap")
 
 # Analysis API base URLs
 DEXSCREENER_URL = "https://api.dexscreener.com"
