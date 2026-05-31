@@ -391,10 +391,11 @@ async def _gemini_review(user_msg: str, log_fn) -> Optional[Dict]:
     body = {
         "system_instruction": {"parts": [{"text": _build_system_prompt()}]},
         "contents": [{"role": "user", "parts": [{"text": user_msg}]}],
-        "generationConfig": {"temperature": 0.4, "maxOutputTokens": 800},
+        # Gemini 2.5 "piensa": sube el limite para que quepan pensamiento + respuesta
+        "generationConfig": {"temperature": 0.4, "maxOutputTokens": 2048},
     }
     try:
-        async with httpx.AsyncClient(timeout=30) as client:
+        async with httpx.AsyncClient(timeout=40) as client:
             r = await client.post(url, json=body)
         if r.status_code != 200:
             log_fn("WARNING", f"Gemini error {r.status_code} - se omite el filtro LLM")
@@ -451,3 +452,102 @@ async def llm_review(analysis, log_fn=None) -> Optional[Dict[str, Any]]:
             return _sanitize(data)
 
     return None
+
+
+# ── Analisis experto de Solana (provider-aware) ─────────────────────────────────
+
+def _extract_tagged_json(text: str, tag: str) -> Optional[Dict]:
+    candidates = []
+    m = re.search(rf"<{tag}>\s*(\{{.*?\}})\s*</{tag}>", text, re.DOTALL)
+    if m:
+        candidates.append(m.group(1))
+    m2 = re.search(r"\{.*\}", text, re.DOTALL)
+    if m2:
+        candidates.append(m2.group(0))
+    for c in candidates:
+        try:
+            return json.loads(c)
+        except json.JSONDecodeError:
+            continue
+    return None
+
+
+async def _ask_llm(system_prompt: str, user_msg: str, log_fn, max_tokens: int = 1300) -> Optional[str]:
+    """Llama al proveedor activo (Claude si esta on; si no, Gemini). Devuelve texto o None."""
+    if _claude_available():
+        try:
+            client = _get_client()
+            kwargs = dict(
+                model=config.LLM_MODEL, max_tokens=max_tokens,
+                system=[{"type": "text", "text": system_prompt, "cache_control": {"type": "ephemeral"}}],
+                messages=[{"role": "user", "content": user_msg}],
+            )
+            if _supports_thinking(config.LLM_MODEL) and config.ENABLE_LLM_THINKING:
+                kwargs["thinking"] = {"type": "adaptive"}
+                kwargs["max_tokens"] = max_tokens + 2500
+                eff = _effort_for(config.LLM_MODEL)
+                if eff:
+                    kwargs["output_config"] = {"effort": eff}
+            resp = await client.messages.create(**kwargs)
+            text = next((b.text for b in resp.content if b.type == "text"), None)
+            if text:
+                return text
+        except Exception as e:
+            log_fn("WARNING", f"Claude (analisis) fallo: {e}")
+    if _gemini_available():
+        url = (f"https://generativelanguage.googleapis.com/v1beta/models/"
+               f"{config.GEMINI_MODEL}:generateContent?key={config.GEMINI_API_KEY}")
+        body = {
+            "system_instruction": {"parts": [{"text": system_prompt}]},
+            "contents": [{"role": "user", "parts": [{"text": user_msg}]}],
+            "generationConfig": {"temperature": 0.5, "maxOutputTokens": max_tokens},
+        }
+        try:
+            async with httpx.AsyncClient(timeout=45) as client:
+                r = await client.post(url, json=body)
+            if r.status_code == 200:
+                cands = r.json().get("candidates", [])
+                if cands:
+                    parts = cands[0].get("content", {}).get("parts", [])
+                    return " ".join(p.get("text", "") for p in parts)
+            else:
+                log_fn("WARNING", f"Gemini (analisis) error {r.status_code}")
+        except Exception as e:
+            log_fn("WARNING", f"Gemini (analisis) fallo: {e}")
+    return None
+
+
+SOL_EXPERT_SYSTEM = """Eres un analista de Solana (SOL) de primer nivel, con vision integral: tecnica, fundamental, on-chain, DeFi y de sentimiento. Te doy un dossier con todos los datos publicos disponibles y debes dar un analisis EXPERTO y HONESTO sobre SOL.
+
+Considera TODO en conjunto: tendencia y momentum, RSI, distancia al maximo historico, cambios 7d/30d/1 año, capitalizacion y volumen, TVL y yields de DeFi en Solana, noticias recientes, e indice de miedo/codicia (contrarian: miedo extremo suele ser oportunidad).
+
+Se honesto: NADIE predice el futuro con certeza. Da una vision PROBABILISTICA, util y accionable: si conviene comprar/acumular/mantener/esperar/reducir/vender, en que horizonte (horas, dias, semanas), por que, y los riesgos. Si los datos no son concluyentes, dilo.
+
+Responde en espanol y TERMINA SIEMPRE con un JSON entre <expert></expert>:
+<expert>{"outlook":"alcista|neutral|bajista","recommendation":"comprar|acumular|mantener|esperar|reducir|vender","timeframe":"ej: dias a semanas","confidence":0-100,"summary":"2-4 frases","key_points":["punto1","punto2"],"risks":["riesgo1"]}</expert>"""
+
+
+async def sol_expert_analysis(dossier: str, log_fn=None) -> Optional[Dict[str, Any]]:
+    """Analisis experto de SOL usando el proveedor activo. Devuelve dict o None."""
+    if log_fn is None:
+        def log_fn(level, msg):
+            pass
+    if not (config.ENABLE_LLM_REVIEW and (_claude_available() or _gemini_available())):
+        return None
+    text = await _ask_llm(SOL_EXPERT_SYSTEM, dossier, log_fn, max_tokens=4000)
+    if not text:
+        return None
+    data = _extract_tagged_json(text, "expert")
+    if not data:
+        return None
+    data["outlook"] = data.get("outlook") if data.get("outlook") in ("alcista", "neutral", "bajista") else "neutral"
+    try:
+        data["confidence"] = max(0, min(100, int(data.get("confidence", 0))))
+    except (ValueError, TypeError):
+        data["confidence"] = 0
+    data["recommendation"] = str(data.get("recommendation", ""))[:30]
+    data["timeframe"] = str(data.get("timeframe", ""))[:60]
+    data["summary"] = str(data.get("summary", ""))[:600]
+    data["key_points"] = [str(x)[:200] for x in (data.get("key_points") or []) if isinstance(data.get("key_points"), list)][:6]
+    data["risks"] = [str(x)[:200] for x in (data.get("risks") or []) if isinstance(data.get("risks"), list)][:5]
+    return data

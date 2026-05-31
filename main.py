@@ -604,10 +604,16 @@ async def get_news():
     }
 
 
+@app.get("/api/sol_expert")
+async def get_sol_expert_endpoint():
+    import sol_expert
+    return await sol_expert.get_sol_expert(bot._sync_log)
+
+
 @app.get("/api/sol_market")
 async def get_sol_market_endpoint():
     import sol_market
-    data = await sol_market.get_sol_market()
+    data = await sol_market.get_sol_market(with_llm=False)  # el analisis lo da /api/sol_expert
     data["swing_enabled"] = config.ENABLE_SOL_SWING
     data["swing_state"] = db.get_state("sol_swing_state", "risk_on")
     data["swing_usdc"] = float(db.get_state("sol_swing_usdc", "0") or 0)

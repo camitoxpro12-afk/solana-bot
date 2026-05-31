@@ -596,17 +596,7 @@ async function loadSolMarket() {
       </div>
     </div>`;
   }
-  let llm = '';
-  if (d.llm_read) {
-    const o = d.llm_read.outlook;
-    const oColor = o==='bullish'?'var(--green)':(o==='bearish'?'var(--red)':'var(--yellow)');
-    const oLabel = {bullish:'Alcista',neutral:'Neutral',bearish:'Bajista'}[o]||o;
-    llm = `<div style="background:var(--panel2);border-radius:8px;padding:12px;margin-top:12px;border-left:3px solid ${oColor}">
-      <div style="font-size:12px;color:var(--muted);margin-bottom:4px">🧠 Lectura de Claude</div>
-      <div><b style="color:${oColor}">${oLabel}</b> <span style="color:var(--muted)">(${d.llm_read.confidence}% confianza)</span></div>
-      <div style="font-size:13px;margin-top:4px">${escapeHtml(d.llm_read.reasoning)}</div>
-    </div>`;
-  }
+  const llm = '<div id="solExpert"><div class="empty" style="padding:14px">🧠 Generando análisis experto de Solana (puede tardar la primera vez)...</div></div>';
   c.innerHTML = `
     <div style="display:flex;align-items:baseline;gap:12px;margin-bottom:4px">
       <div style="font-size:28px;font-weight:700">$${d.price_usd}</div>
@@ -644,6 +634,37 @@ async function loadSolMarket() {
     ${llm}
     <div style="font-size:10px;color:var(--muted);margin-top:8px;text-align:right">Actualizado ${d.updated_ts||''}</div>
   `;
+  loadSolExpert();
+}
+
+async function loadSolExpert() {
+  const el = document.getElementById('solExpert');
+  if (!el) return;
+  let d;
+  try { d = await (await fetch('/api/sol_expert')).json(); }
+  catch(e){ return; }
+  if (d && d.computing && !d.report) {
+    el.innerHTML = '<div class="empty" style="padding:14px">🧠 Generando análisis experto... (recarga en ~30s)</div>';
+    return;
+  }
+  const r = d && d.report;
+  if (!r) { el.innerHTML = '<div class="empty" style="padding:14px">Análisis experto no disponible (IA desactivada o sin respuesta)</div>'; return; }
+  const oc = {alcista:'var(--green)', bajista:'var(--red)', neutral:'var(--yellow)'}[r.outlook] || 'var(--muted)';
+  const list = (arr) => arr.map(p=>`<li>${escapeHtml(p)}</li>`).join('');
+  el.innerHTML = `
+    <div style="background:var(--panel2);border-radius:8px;padding:14px;margin-top:14px;border-left:3px solid ${oc}">
+      <div style="font-size:13px;color:var(--muted);margin-bottom:8px">🧠 Análisis Experto de Solana (IA)</div>
+      <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:baseline;margin-bottom:8px">
+        <span style="font-weight:700;color:${oc};text-transform:capitalize;font-size:15px">${escapeHtml(r.outlook)}</span>
+        <span>Acción: <b style="text-transform:capitalize">${escapeHtml(r.recommendation)}</b></span>
+        <span style="color:var(--muted)">Horizonte: ${escapeHtml(r.timeframe||'-')}</span>
+        <span style="color:var(--muted)">Confianza: ${r.confidence}%</span>
+      </div>
+      <div style="font-size:13px;margin-bottom:8px;line-height:1.55">${escapeHtml(r.summary||'')}</div>
+      ${(r.key_points&&r.key_points.length)?`<div style="font-size:12px"><b>Puntos clave:</b><ul style="margin:4px 0 0 18px;padding:0;color:var(--text)">${list(r.key_points)}</ul></div>`:''}
+      ${(r.risks&&r.risks.length)?`<div style="font-size:12px;margin-top:6px;color:var(--yellow)"><b>Riesgos:</b><ul style="margin:4px 0 0 18px;padding:0">${list(r.risks)}</ul></div>`:''}
+      <div style="font-size:10px;color:var(--muted);margin-top:10px">No es asesoramiento financiero. Nadie predice el futuro con certeza — es un análisis probabilístico.</div>
+    </div>`;
 }
 
 async function startBot() {
