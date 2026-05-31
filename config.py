@@ -52,7 +52,7 @@ ENABLE_LLM_WEBSEARCH = os.getenv("ENABLE_LLM_WEBSEARCH", "false").lower() == "tr
 # IA GRATIS de respaldo (Google Gemini): se usa si Claude falla/se acaba el saldo.
 # Consigue una key gratis en https://aistudio.google.com/apikey
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
 
 # Intervals (seconds)
 SCAN_INTERVAL = int(os.getenv("SCAN_INTERVAL", "30"))
