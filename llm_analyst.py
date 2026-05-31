@@ -24,16 +24,33 @@ from typing import Optional, Dict, Any
 import httpx
 import config
 
-# Control de ritmo para Gemini (capa gratuita ~10-15 peticiones/min)
+# Control de ritmo + POOL de claves de Gemini (rota entre varias para repartir la carga)
 _gemini_lock = asyncio.Lock()
 _gemini_last = [0.0]
-GEMINI_MIN_INTERVAL = 6.0  # segundos minimos entre llamadas a Gemini
+_gemini_key_idx = [0]
+GEMINI_MIN_INTERVAL = 6.0  # segundos minimos entre llamadas POR CLAVE
+
+
+def _gemini_keys() -> list:
+    """Lista de claves de Gemini (GEMINI_API_KEY puede traer varias separadas por comas)."""
+    return [k.strip() for k in (config.GEMINI_API_KEY or "").split(",") if k.strip()]
+
+
+def _next_gemini_key() -> Optional[str]:
+    """Devuelve la siguiente clave en rotacion (round-robin) para repartir la carga."""
+    keys = _gemini_keys()
+    if not keys:
+        return None
+    k = keys[_gemini_key_idx[0] % len(keys)]
+    _gemini_key_idx[0] += 1
+    return k
 
 
 async def _throttle_gemini():
-    """Serializa y espacia las llamadas a Gemini para no exceder su limite gratuito."""
+    """Espacia las llamadas a Gemini. Con N claves, el ritmo global es N veces mas rapido."""
     async with _gemini_lock:
-        wait = GEMINI_MIN_INTERVAL - (time.monotonic() - _gemini_last[0])
+        interval = GEMINI_MIN_INTERVAL / max(1, len(_gemini_keys()))
+        wait = interval - (time.monotonic() - _gemini_last[0])
         if wait > 0:
             await asyncio.sleep(wait)
         _gemini_last[0] = time.monotonic()
@@ -117,7 +134,7 @@ def _claude_available() -> bool:
 
 
 def _gemini_available() -> bool:
-    return config.LLM_USE_GEMINI and bool(config.GEMINI_API_KEY)
+    return config.LLM_USE_GEMINI and bool(_gemini_keys())
 
 
 def is_enabled() -> bool:
@@ -402,8 +419,11 @@ async def sol_market_read(m: Dict[str, Any], log_fn=None) -> Optional[Dict[str, 
 
 async def _gemini_review(user_msg: str, log_fn) -> Optional[Dict]:
     """IA GRATIS (Google Gemini) via REST. Devuelve el dict del veredicto o None."""
+    key = _next_gemini_key()
+    if not key:
+        return None
     url = (f"https://generativelanguage.googleapis.com/v1beta/models/"
-           f"{config.GEMINI_MODEL}:generateContent?key={config.GEMINI_API_KEY}")
+           f"{config.GEMINI_MODEL}:generateContent?key={key}")
     body = {
         "system_instruction": {"parts": [{"text": _build_system_prompt()}]},
         "contents": [{"role": "user", "parts": [{"text": user_msg}]}],
@@ -512,8 +532,9 @@ async def _ask_llm(system_prompt: str, user_msg: str, log_fn, max_tokens: int = 
         except Exception as e:
             log_fn("WARNING", f"Claude (analisis) fallo: {e}")
     if _gemini_available():
+        key = _next_gemini_key()
         url = (f"https://generativelanguage.googleapis.com/v1beta/models/"
-               f"{config.GEMINI_MODEL}:generateContent?key={config.GEMINI_API_KEY}")
+               f"{config.GEMINI_MODEL}:generateContent?key={key}")
         body = {
             "system_instruction": {"parts": [{"text": system_prompt}]},
             "contents": [{"role": "user", "parts": [{"text": user_msg}]}],
