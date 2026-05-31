@@ -32,7 +32,7 @@ MAX_TOKEN_AGE_HOURS = int(os.getenv("MAX_TOKEN_AGE_HOURS", "48"))
 SCAN_NEW = os.getenv("SCAN_NEW", "false").lower() == "true"          # recien creadas (pump.fun) - mucho spam
 SCAN_TRENDING = os.getenv("SCAN_TRENDING", "true").lower() == "true"  # en tendencia (de moda)
 SCAN_TOP = os.getenv("SCAN_TOP", "true").lower() == "true"            # top por volumen 24h
-RESCAN_TRENDING_MINUTES = int(os.getenv("RESCAN_TRENDING_MINUTES", "30"))  # re-evaluar trending cada X min
+RESCAN_TRENDING_MINUTES = int(os.getenv("RESCAN_TRENDING_MINUTES", "20"))  # re-evaluar trending cada X min
 
 # APIs
 CRYPTOPANIC_API_KEY = os.getenv("CRYPTOPANIC_API_KEY", "")

@@ -263,8 +263,9 @@ async def scan_new_tokens(
         # Small delay between analyses to avoid rate limiting
         await asyncio.sleep(1.5)
 
-    if new_count > 0:
-        add_log("INFO", f"Scan completo: {new_count} nuevos tokens analizados")
+    # Latido: se registra SIEMPRE para que se vea que el escaner sigue vivo
+    add_log("INFO", f"🔍 Escaneo completo: {new_count} monedas nuevas analizadas | "
+                    f"{len(_last_analyzed)} en seguimiento (re-evaluo cada {config.RESCAN_TRENDING_MINUTES} min)")
 
 
 async def scanner_loop(
