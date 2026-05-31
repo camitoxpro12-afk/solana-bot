@@ -593,9 +593,43 @@ async def get_trades(limit: int = 50):
     return db.get_trades(limit)
 
 
+def _compute_exit_plan(p: dict) -> dict:
+    """Calcula los niveles de salida de una posicion (para mostrar el plan en el dashboard)."""
+    buy = p.get("buy_price_usd") or 0
+    cur = p.get("current_price_usd") or buy
+    high = max(p.get("highest_price_usd") or 0, cur, buy)
+    plan = {"partial_taken": bool(p.get("partial_taken"))}
+    if config.ENABLE_PARTIAL_TP and not p.get("partial_taken"):
+        plan["partial_tp_price"] = round(buy * (1 + config.PARTIAL_TP_TRIGGER_PCT), 10)
+        plan["partial_tp_pct"] = round(config.PARTIAL_TP_TRIGGER_PCT * 100)
+    if config.ENABLE_TRAILING_STOP:
+        plan["mode"] = "trailing"
+        plan["trailing_pct"] = round(config.TRAILING_STOP_PCT * 100)
+        plan["peak_pct"] = round(((high - buy) / buy * 100), 1) if buy > 0 else 0
+        if high > buy:  # el trailing solo se activa si entro en beneficio (igual que el monitor)
+            trail = high * (1 - config.TRAILING_STOP_PCT)
+            plan["sell_price"] = round(max(p.get("stop_price_usd") or 0, trail), 10)
+            plan["trailing_active"] = True
+        else:
+            plan["sell_price"] = p.get("stop_price_usd")
+            plan["trailing_active"] = False
+    else:
+        plan["mode"] = "fixed"
+        plan["take_profit_price"] = p.get("target_price_usd")
+        plan["sell_price"] = p.get("stop_price_usd")
+    # % al que esta el nivel de venta respecto a la compra
+    sp = plan.get("sell_price") or 0
+    plan["sell_at_pct"] = round(((sp - buy) / buy * 100), 1) if buy > 0 else 0
+    plan["stop_loss_pct"] = round(-config.STOP_LOSS_PCT * 100)
+    return plan
+
+
 @app.get("/api/positions")
 async def get_positions():
-    return db.get_open_positions()
+    positions = db.get_open_positions()
+    for p in positions:
+        p["exit_plan"] = _compute_exit_plan(p)
+    return positions
 
 
 @app.get("/api/logs")

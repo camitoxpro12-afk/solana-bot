@@ -429,9 +429,31 @@ function renderPositions(positions) {
         <span>⏱ ${timeAgo(p.buy_time)}</span>
         <button class="close-btn" onclick="closePosition(${p.id})">Cerrar</button>
       </div>
+      ${exitPlanHtml(p.exit_plan)}
       <div class="progress-bar"><div class="progress-fill" style="width:${prog}%"></div></div>
     </div>`;
   }).join('');
+}
+
+function exitPlanHtml(plan) {
+  if (!plan) return '';
+  const px = (v) => '$' + Number(v||0).toPrecision(4);
+  const lines = [];
+  if (plan.partial_taken) {
+    lines.push('✅ Ya vendió la mitad — el resto corre con stop en tu precio de entrada (sin pérdida)');
+  } else if (plan.partial_tp_price) {
+    lines.push(`🎯 Vende la MITAD si sube a +${plan.partial_tp_pct}% (${px(plan.partial_tp_price)})`);
+  }
+  if (plan.mode === 'trailing') {
+    if (plan.trailing_active) {
+      lines.push(`📉 Vende si baja a ${px(plan.sell_price)} (${plan.sell_at_pct>=0?'+':''}${plan.sell_at_pct}%) — trailing ${plan.trailing_pct}% bajo el pico (+${plan.peak_pct}%)`);
+    } else {
+      lines.push(`🛡 Stop-loss en ${px(plan.sell_price)} (${plan.sell_at_pct}%). El trailing se activará cuando entre en ganancia.`);
+    }
+  } else if (plan.take_profit_price) {
+    lines.push(`🎯 Vende todo en ${px(plan.take_profit_price)}`);
+  }
+  return `<div style="font-size:11px;color:var(--muted);margin-top:8px;border-top:1px solid var(--border);padding-top:7px;line-height:1.7"><b style="color:var(--text)">📋 Plan de salida:</b><br>${lines.join('<br>')}</div>`;
 }
 
 function updatePositionPnl(d) {
