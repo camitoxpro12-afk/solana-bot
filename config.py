@@ -94,6 +94,28 @@ GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
 LLM_USE_CLAUDE = os.getenv("LLM_USE_CLAUDE", "false").lower() == "true"  # off por defecto (sin saldo)
 LLM_USE_GEMINI = os.getenv("LLM_USE_GEMINI", "true").lower() == "true"   # Gemini gratis por defecto
 
+# === MAS IAs GRATIS (rotacion automatica: cuando una llega a su limite GRATIS,
+# el bot salta a la siguiente al instante y NUNCA para). Todas son gratis, rapidas
+# y compatibles con OpenAI. Consigue las claves gratis (sin tarjeta):
+#   Groq       -> https://console.groq.com/keys     (rapidisima, ~14.400 peticiones/dia)
+#   Cerebras   -> https://cloud.cerebras.ai/        (1 millon de tokens/dia)
+#   OpenRouter -> https://openrouter.ai/keys        (decenas de modelos gratis)
+# Pega cada clave en el .env y se activa sola. Cuantas mas pongas, mas continuo va.
+GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
+GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
+GROQ_BASE_URL = os.getenv("GROQ_BASE_URL", "https://api.groq.com/openai/v1")
+LLM_USE_GROQ = os.getenv("LLM_USE_GROQ", "true").lower() == "true"
+
+CEREBRAS_API_KEY = os.getenv("CEREBRAS_API_KEY", "")
+CEREBRAS_MODEL = os.getenv("CEREBRAS_MODEL", "llama-3.3-70b")
+CEREBRAS_BASE_URL = os.getenv("CEREBRAS_BASE_URL", "https://api.cerebras.ai/v1")
+LLM_USE_CEREBRAS = os.getenv("LLM_USE_CEREBRAS", "true").lower() == "true"
+
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
+OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "meta-llama/llama-3.3-70b-instruct:free")
+OPENROUTER_BASE_URL = os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
+LLM_USE_OPENROUTER = os.getenv("LLM_USE_OPENROUTER", "true").lower() == "true"
+
 # Intervals (seconds)
 SCAN_INTERVAL = int(os.getenv("SCAN_INTERVAL", "30"))
 PRICE_CHECK_INTERVAL = int(os.getenv("PRICE_CHECK_INTERVAL", "8"))

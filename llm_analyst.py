@@ -138,8 +138,8 @@ def _gemini_available() -> bool:
 
 
 def is_enabled() -> bool:
-    """Activo si el filtro LLM esta on y hay AL MENOS un proveedor (Claude o Gemini)."""
-    return config.ENABLE_LLM_REVIEW and (_claude_available() or _gemini_available())
+    """Activo si el filtro LLM esta on y hay AL MENOS un proveedor disponible."""
+    return config.ENABLE_LLM_REVIEW and (_claude_available() or _any_free_available())
 
 
 def provider_label() -> str:
@@ -147,8 +147,18 @@ def provider_label() -> str:
     if _claude_available():
         parts.append(f"Claude ({config.LLM_MODEL})")
     if _gemini_available():
-        parts.append("Gemini gratis" + (" (respaldo)" if _claude_available() else ""))
-    return " + ".join(parts) if parts else "ninguno (solo algoritmo)"
+        parts.append("Gemini")
+    if _groq_available():
+        parts.append("Groq")
+    if _cerebras_available():
+        parts.append("Cerebras")
+    if _openrouter_available():
+        parts.append("OpenRouter")
+    if not parts:
+        return "ninguno (solo algoritmo)"
+    if len(parts) > 1:
+        return " + ".join(parts) + " (rotacion automatica, nunca para)"
+    return parts[0]
 
 
 def _supports_thinking(model: str) -> bool:
@@ -482,11 +492,13 @@ async def llm_review(analysis, log_fn=None) -> Optional[Dict[str, Any]]:
         except Exception as e:
             log_fn("WARNING", f"Claude fallo ({e})" + (" - probando Gemini gratis" if _gemini_available() else ""))
 
-    # 2) Gemini (GRATIS) como alternativa / respaldo
-    if _gemini_available():
-        data = await _gemini_review(user_msg, log_fn)
-        if data:
-            return _sanitize(data)
+    # 2) Pool de IAs GRATIS (Gemini, Groq, Cerebras, OpenRouter) con rotacion automatica
+    if _any_free_available():
+        text = await _ask_pool(_build_system_prompt(), user_msg, 2048, log_fn)
+        if text:
+            data = _extract_verdict_json(text)
+            if data:
+                return _sanitize(data)
 
     return None
 
@@ -509,8 +521,145 @@ def _extract_tagged_json(text: str, tag: str) -> Optional[Dict]:
     return None
 
 
+# ── POOL de IAs GRATIS con rotacion + failover (para que NUNCA pare) ────────────
+# Groq, Cerebras y OpenRouter hablan el formato OpenAI; Gemini su propio REST. Se
+# llaman igual. Rotamos el proveedor inicial en cada llamada para repartir la carga,
+# y si uno falla (limite/error) saltamos al siguiente al instante.
+_pool_idx = [0]
+_key_idx: Dict[str, int] = {}
+
+
+def _keys_of(raw: str) -> list:
+    return [k.strip() for k in (raw or "").split(",") if k.strip()]
+
+
+def _next_key(name: str, raw: str) -> Optional[str]:
+    keys = _keys_of(raw)
+    if not keys:
+        return None
+    i = _key_idx.get(name, 0)
+    _key_idx[name] = i + 1
+    return keys[i % len(keys)]
+
+
+def _groq_available() -> bool:
+    return config.LLM_USE_GROQ and bool(_keys_of(config.GROQ_API_KEY))
+
+
+def _cerebras_available() -> bool:
+    return config.LLM_USE_CEREBRAS and bool(_keys_of(config.CEREBRAS_API_KEY))
+
+
+def _openrouter_available() -> bool:
+    return config.LLM_USE_OPENROUTER and bool(_keys_of(config.OPENROUTER_API_KEY))
+
+
+def _any_free_available() -> bool:
+    return _gemini_available() or _groq_available() or _cerebras_available() or _openrouter_available()
+
+
+async def _gemini_ask(system_prompt: str, user_msg: str, max_tokens: int, log_fn) -> Optional[str]:
+    key = _next_gemini_key()
+    if not key:
+        return None
+    url = (f"https://generativelanguage.googleapis.com/v1beta/models/"
+           f"{config.GEMINI_MODEL}:generateContent?key={key}")
+    body = {
+        "system_instruction": {"parts": [{"text": system_prompt}]},
+        "contents": [{"role": "user", "parts": [{"text": user_msg}]}],
+        "generationConfig": {"temperature": 0.5, "maxOutputTokens": max_tokens},
+    }
+    try:
+        await _throttle_gemini()
+        async with httpx.AsyncClient(timeout=45) as client:
+            r = await client.post(url, json=body)
+        if r.status_code == 200:
+            cands = r.json().get("candidates", [])
+            if cands:
+                parts = cands[0].get("content", {}).get("parts", [])
+                return (" ".join(p.get("text", "") for p in parts)) or None
+        else:
+            log_fn("WARNING", f"Gemini error {r.status_code}")
+    except Exception as e:
+        log_fn("WARNING", f"Gemini fallo: {e}")
+    return None
+
+
+async def _openai_ask(name: str, base_url: str, model: str, key_raw: str, label: str,
+                      system_prompt: str, user_msg: str, max_tokens: int, log_fn) -> Optional[str]:
+    """Llamada generica a cualquier proveedor compatible con OpenAI (Groq/Cerebras/OpenRouter)."""
+    key = _next_key(name, key_raw)
+    if not key:
+        return None
+    headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
+    if name == "openrouter":
+        headers["HTTP-Referer"] = "https://github.com/camitoxpro12-afk/solana-bot"
+        headers["X-Title"] = "Solana Trading Bot"
+    body = {
+        "model": model,
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_msg},
+        ],
+        "max_tokens": max_tokens,
+        "temperature": 0.5,
+    }
+    try:
+        async with httpx.AsyncClient(timeout=45) as client:
+            r = await client.post(f"{base_url}/chat/completions", json=body, headers=headers)
+        if r.status_code == 200:
+            choices = r.json().get("choices", [])
+            if choices:
+                return ((choices[0].get("message", {}) or {}).get("content")) or None
+        else:
+            log_fn("WARNING", f"{label} error {r.status_code}")
+    except Exception as e:
+        log_fn("WARNING", f"{label} fallo: {e}")
+    return None
+
+
+def _free_providers() -> list:
+    """IAs gratis disponibles, cada una con una llamada uniforme (system, user, max_tokens, log)."""
+    provs = []
+    if _gemini_available():
+        provs.append(("Gemini gratis", _gemini_ask))
+    if _groq_available():
+        provs.append((f"Groq ({config.GROQ_MODEL})",
+                      lambda s, u, m, lf: _openai_ask("groq", config.GROQ_BASE_URL, config.GROQ_MODEL,
+                                                      config.GROQ_API_KEY, "Groq", s, u, m, lf)))
+    if _cerebras_available():
+        provs.append((f"Cerebras ({config.CEREBRAS_MODEL})",
+                      lambda s, u, m, lf: _openai_ask("cerebras", config.CEREBRAS_BASE_URL, config.CEREBRAS_MODEL,
+                                                      config.CEREBRAS_API_KEY, "Cerebras", s, u, m, lf)))
+    if _openrouter_available():
+        provs.append((f"OpenRouter ({config.OPENROUTER_MODEL})",
+                      lambda s, u, m, lf: _openai_ask("openrouter", config.OPENROUTER_BASE_URL, config.OPENROUTER_MODEL,
+                                                      config.OPENROUTER_API_KEY, "OpenRouter", s, u, m, lf)))
+    return provs
+
+
+async def _ask_pool(system_prompt: str, user_msg: str, max_tokens: int, log_fn) -> Optional[str]:
+    """Rota entre las IAs gratis; si una falla o llega a su limite, salta a la siguiente. Nunca para."""
+    provs = _free_providers()
+    if not provs:
+        return None
+    n = len(provs)
+    start = _pool_idx[0] % n
+    _pool_idx[0] = (start + 1) % n
+    for off in range(n):
+        label, call = provs[(start + off) % n]
+        text = await call(system_prompt, user_msg, max_tokens, log_fn)
+        if text:
+            log_fn("INFO", f"LLM: {label} respondio")
+            return text
+        if n > 1:
+            log_fn("INFO", f"{label} sin respuesta - salto al siguiente proveedor")
+    return None
+
+
 async def _ask_llm(system_prompt: str, user_msg: str, log_fn, max_tokens: int = 1300) -> Optional[str]:
-    """Llama al proveedor activo (Claude si esta on; si no, Gemini). Devuelve texto o None."""
+    """Claude (si esta on) y si no, el pool de IAs gratis con rotacion. Devuelve texto o None."""
+    # 1) Claude premium si esta activo (normalmente off: sin saldo)
     if _claude_available():
         try:
             client = _get_client()
@@ -531,29 +680,8 @@ async def _ask_llm(system_prompt: str, user_msg: str, log_fn, max_tokens: int = 
                 return text
         except Exception as e:
             log_fn("WARNING", f"Claude (analisis) fallo: {e}")
-    if _gemini_available():
-        key = _next_gemini_key()
-        url = (f"https://generativelanguage.googleapis.com/v1beta/models/"
-               f"{config.GEMINI_MODEL}:generateContent?key={key}")
-        body = {
-            "system_instruction": {"parts": [{"text": system_prompt}]},
-            "contents": [{"role": "user", "parts": [{"text": user_msg}]}],
-            "generationConfig": {"temperature": 0.5, "maxOutputTokens": max_tokens},
-        }
-        try:
-            await _throttle_gemini()
-            async with httpx.AsyncClient(timeout=45) as client:
-                r = await client.post(url, json=body)
-            if r.status_code == 200:
-                cands = r.json().get("candidates", [])
-                if cands:
-                    parts = cands[0].get("content", {}).get("parts", [])
-                    return " ".join(p.get("text", "") for p in parts)
-            else:
-                log_fn("WARNING", f"Gemini (analisis) error {r.status_code}")
-        except Exception as e:
-            log_fn("WARNING", f"Gemini (analisis) fallo: {e}")
-    return None
+    # 2) Pool de IAs gratis con rotacion + failover (nunca para)
+    return await _ask_pool(system_prompt, user_msg, max_tokens, log_fn)
 
 
 SOL_EXPERT_SYSTEM = """Eres un analista de Solana (SOL) de primer nivel, con vision integral: tecnica, fundamental, on-chain, DeFi y de sentimiento. Te doy un dossier con todos los datos publicos disponibles y debes dar un analisis EXPERTO y HONESTO sobre SOL.

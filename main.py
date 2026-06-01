@@ -950,8 +950,15 @@ async def get_settings():
         "websearch": config.ENABLE_LLM_WEBSEARCH,
         "use_claude": config.LLM_USE_CLAUDE,
         "use_gemini": config.LLM_USE_GEMINI,
+        "use_groq": config.LLM_USE_GROQ,
+        "use_cerebras": config.LLM_USE_CEREBRAS,
+        "use_openrouter": config.LLM_USE_OPENROUTER,
         "has_claude_key": bool(config.ANTHROPIC_API_KEY),
         "has_gemini_key": bool(config.GEMINI_API_KEY),
+        "has_groq_key": bool(config.GROQ_API_KEY),
+        "has_cerebras_key": bool(config.CEREBRAS_API_KEY),
+        "has_openrouter_key": bool(config.OPENROUTER_API_KEY),
+        "provider_label": llm_analyst.provider_label(),
     }
 
 
@@ -975,6 +982,15 @@ async def update_settings(data: dict):
     if "use_gemini" in data:
         config.LLM_USE_GEMINI = bool(data["use_gemini"])
         _persist_env("LLM_USE_GEMINI", "true" if config.LLM_USE_GEMINI else "false")
+    if "use_groq" in data:
+        config.LLM_USE_GROQ = bool(data["use_groq"])
+        _persist_env("LLM_USE_GROQ", "true" if config.LLM_USE_GROQ else "false")
+    if "use_cerebras" in data:
+        config.LLM_USE_CEREBRAS = bool(data["use_cerebras"])
+        _persist_env("LLM_USE_CEREBRAS", "true" if config.LLM_USE_CEREBRAS else "false")
+    if "use_openrouter" in data:
+        config.LLM_USE_OPENROUTER = bool(data["use_openrouter"])
+        _persist_env("LLM_USE_OPENROUTER", "true" if config.LLM_USE_OPENROUTER else "false")
     if "llm_enabled" in data:
         config.ENABLE_LLM_REVIEW = bool(data["llm_enabled"])
         _persist_env("ENABLE_LLM_REVIEW", "true" if config.ENABLE_LLM_REVIEW else "false")

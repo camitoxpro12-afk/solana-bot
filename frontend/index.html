@@ -581,10 +581,14 @@ async function loadSettings() {
   c.innerHTML = `
     <div style="display:flex;flex-direction:column;gap:16px">
       <div>
-        <label class="set-label">🤖 Proveedores de IA</label>
-        <label style="font-weight:400;display:block;margin-bottom:5px"><input type="checkbox" id="setUseGemini" ${s.use_gemini?'checked':''}> Gemini (GRATIS) ${s.has_gemini_key?'':'<span style="color:var(--yellow)">⚠ falta key</span>'}</label>
+        <label class="set-label">🤖 Proveedores de IA (gratis, rotación automática)</label>
+        <label style="font-weight:400;display:block;margin-bottom:5px"><input type="checkbox" id="setUseGemini" ${s.use_gemini?'checked':''}> Gemini (GRATIS, el más listo) ${s.has_gemini_key?'':'<span style="color:var(--yellow)">⚠ falta key</span>'}</label>
+        <label style="font-weight:400;display:block;margin-bottom:5px"><input type="checkbox" id="setUseGroq" ${s.use_groq?'checked':''}> Groq ⚡ (GRATIS, rapidísima) ${s.has_groq_key?'':'<span style="color:var(--yellow)">⚠ falta key</span>'}</label>
+        <label style="font-weight:400;display:block;margin-bottom:5px"><input type="checkbox" id="setUseCerebras" ${s.use_cerebras?'checked':''}> Cerebras 🚀 (GRATIS, 1M tokens/día) ${s.has_cerebras_key?'':'<span style="color:var(--yellow)">⚠ falta key</span>'}</label>
+        <label style="font-weight:400;display:block;margin-bottom:5px"><input type="checkbox" id="setUseOpenrouter" ${s.use_openrouter?'checked':''}> OpenRouter 🎛 (GRATIS, respaldo) ${s.has_openrouter_key?'':'<span style="color:var(--yellow)">⚠ falta key</span>'}</label>
         <label style="font-weight:400;display:block"><input type="checkbox" id="setUseClaude" ${s.use_claude?'checked':''}> Claude (de pago) ${s.has_claude_key?'':'<span style="color:var(--yellow)">⚠ falta key</span>'}</label>
-        <div style="font-size:11px;color:var(--muted);margin-top:5px">Si activas ambos: Claude primero, Gemini de respaldo. Si ninguno: solo el algoritmo (gratis, también seguro).</div>
+        <div style="font-size:11px;color:var(--muted);margin-top:5px">🔄 <b>Rotación automática:</b> cuando una IA llega a su límite gratis, el bot salta a la siguiente al instante — <b>nunca para</b>. Activo ahora: ${s.provider_label||'ninguno'}</div>
+        <div style="font-size:11px;color:var(--muted);margin-top:3px">Consigue las keys gratis (sin tarjeta): Groq → console.groq.com/keys · Cerebras → cloud.cerebras.ai · OpenRouter → openrouter.ai/keys</div>
       </div>
       <div>
         <label class="set-label">Modelo de Claude <span style="color:var(--muted);font-size:11px">· solo si Claude está activo</span></label>
@@ -630,6 +634,9 @@ async function saveSettings() {
     websearch: document.getElementById('setWeb').checked,
     use_claude: document.getElementById('setUseClaude').checked,
     use_gemini: document.getElementById('setUseGemini').checked,
+    use_groq: document.getElementById('setUseGroq').checked,
+    use_cerebras: document.getElementById('setUseCerebras').checked,
+    use_openrouter: document.getElementById('setUseOpenrouter').checked,
   };
   const msg = document.getElementById('setMsg');
   msg.textContent = 'Guardando...'; msg.style.color = 'var(--muted)';
