@@ -293,8 +293,9 @@ class BotEngine:
                         pnl_pct = (current_price - buy_price) / buy_price * 100 if buy_price > 0 else 0
 
                         # Maximo historico (para trailing stop)
-                        highest = max(pos.get("highest_price_usd", 0) or 0, current_price)
-                        if config.ENABLE_TRAILING_STOP:
+                        previous_high = pos.get("highest_price_usd", 0) or 0
+                        highest = max(previous_high, current_price)
+                        if highest > previous_high:
                             db.update_position_high(pos["id"], current_price)
 
                         await self.broadcast("position_update", {
