@@ -116,6 +116,13 @@ OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "meta-llama/llama-3.3-70b-instr
 OPENROUTER_BASE_URL = os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
 LLM_USE_OPENROUTER = os.getenv("LLM_USE_OPENROUTER", "true").lower() == "true"
 
+# Asignacion de proveedor por tarea. Cada tarea usa su proveedor favorito primero,
+# pero si falla o llega a limite, cae al pool de respaldo automaticamente.
+# Valores validos: gemini | groq | cerebras | openrouter | claude | auto
+LLM_ENTRY_PROVIDER = os.getenv("LLM_ENTRY_PROVIDER", "gemini")      # filtro/decision de compra
+LLM_EXIT_PROVIDER = os.getenv("LLM_EXIT_PROVIDER", "groq")          # posiciones abiertas (rapidez)
+LLM_SOL_PROVIDER = os.getenv("LLM_SOL_PROVIDER", "cerebras")        # analisis experto de SOL
+
 # Intervals (seconds)
 SCAN_INTERVAL = int(os.getenv("SCAN_INTERVAL", "30"))
 PRICE_CHECK_INTERVAL = int(os.getenv("PRICE_CHECK_INTERVAL", "8"))

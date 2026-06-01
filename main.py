@@ -638,6 +638,7 @@ class BotEngine:
         if llm_analyst.is_enabled():
             ws_note = " + busqueda web" if config.ENABLE_LLM_WEBSEARCH else ""
             await self.broadcast_log("INFO", f"Filtro LLM ACTIVO: {llm_analyst.provider_label()}{ws_note}")
+            await self.broadcast_log("INFO", f"Roles IA: {llm_analyst.role_label()} (con respaldo automatico)")
         else:
             await self.broadcast_log("INFO", "Filtro LLM desactivado - solo analisis algoritmico (gratis)")
 
@@ -959,6 +960,10 @@ async def get_settings():
         "has_cerebras_key": bool(config.CEREBRAS_API_KEY),
         "has_openrouter_key": bool(config.OPENROUTER_API_KEY),
         "provider_label": llm_analyst.provider_label(),
+        "role_label": llm_analyst.role_label(),
+        "entry_provider": config.LLM_ENTRY_PROVIDER,
+        "exit_provider": config.LLM_EXIT_PROVIDER,
+        "sol_provider": config.LLM_SOL_PROVIDER,
     }
 
 
@@ -994,6 +999,16 @@ async def update_settings(data: dict):
     if "llm_enabled" in data:
         config.ENABLE_LLM_REVIEW = bool(data["llm_enabled"])
         _persist_env("ENABLE_LLM_REVIEW", "true" if config.ENABLE_LLM_REVIEW else "false")
+    valid_providers = {"gemini", "groq", "cerebras", "openrouter", "claude", "auto"}
+    if data.get("entry_provider") in valid_providers:
+        config.LLM_ENTRY_PROVIDER = data["entry_provider"]
+        _persist_env("LLM_ENTRY_PROVIDER", config.LLM_ENTRY_PROVIDER)
+    if data.get("exit_provider") in valid_providers:
+        config.LLM_EXIT_PROVIDER = data["exit_provider"]
+        _persist_env("LLM_EXIT_PROVIDER", config.LLM_EXIT_PROVIDER)
+    if data.get("sol_provider") in valid_providers:
+        config.LLM_SOL_PROVIDER = data["sol_provider"]
+        _persist_env("LLM_SOL_PROVIDER", config.LLM_SOL_PROVIDER)
     await bot.broadcast_log("INFO", f"Ajustes guardados: modelo={config.LLM_MODEL}, esfuerzo={config.LLM_EFFORT}, riesgo={config.RISK_MODE}")
     await bot.broadcast("balance_update", await bot.get_status())
     return await get_settings()

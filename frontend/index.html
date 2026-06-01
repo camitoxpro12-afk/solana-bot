@@ -578,6 +578,13 @@ async function loadSettings() {
   try { s = await (await fetch('/api/settings')).json(); }
   catch(e){ c.innerHTML = '<div class="empty">Error cargando ajustes</div>'; return; }
   const opt = (cur,v,label) => `<option value="${v}" ${cur===v?'selected':''}>${label}</option>`;
+  const providerOpt = (cur) => `
+          ${opt(cur,'gemini','Gemini - analisis equilibrado')}
+          ${opt(cur,'groq','Groq - muy rapido')}
+          ${opt(cur,'cerebras','Cerebras - razonamiento amplio')}
+          ${opt(cur,'openrouter','OpenRouter - respaldo')}
+          ${opt(cur,'claude','Claude - pago')}
+          ${opt(cur,'auto','Automatico - rotacion libre')}`;
   c.innerHTML = `
     <div style="display:flex;flex-direction:column;gap:16px">
       <div>
@@ -589,6 +596,24 @@ async function loadSettings() {
         <label style="font-weight:400;display:block"><input type="checkbox" id="setUseClaude" ${s.use_claude?'checked':''}> Claude (de pago) ${s.has_claude_key?'':'<span style="color:var(--yellow)">⚠ falta key</span>'}</label>
         <div style="font-size:11px;color:var(--muted);margin-top:5px">🔄 <b>Rotación automática:</b> cuando una IA llega a su límite gratis, el bot salta a la siguiente al instante — <b>nunca para</b>. Activo ahora: ${s.provider_label||'ninguno'}</div>
         <div style="font-size:11px;color:var(--muted);margin-top:3px">Consigue las keys gratis (sin tarjeta): Groq → console.groq.com/keys · Cerebras → cloud.cerebras.ai · OpenRouter → openrouter.ai/keys</div>
+      </div>
+      <div>
+        <label class="set-label">🧠 Tareas de cada IA</label>
+        <div class="grid" style="gap:10px">
+          <div>
+            <div style="font-size:12px;color:var(--muted);margin-bottom:4px">Entrada / filtro de monedas</div>
+            <select id="setEntryProvider" class="set-input">${providerOpt(s.entry_provider||'gemini')}</select>
+          </div>
+          <div>
+            <div style="font-size:12px;color:var(--muted);margin-bottom:4px">Salida / trades abiertos</div>
+            <select id="setExitProvider" class="set-input">${providerOpt(s.exit_provider||'groq')}</select>
+          </div>
+          <div>
+            <div style="font-size:12px;color:var(--muted);margin-bottom:4px">Mercado SOL</div>
+            <select id="setSolProvider" class="set-input">${providerOpt(s.sol_provider||'cerebras')}</select>
+          </div>
+        </div>
+        <div style="font-size:11px;color:var(--muted);margin-top:6px">Cada tarea intenta primero su IA asignada. Si falla, llega al limite o no responde, usa otro proveedor activo sin detener el bot. Roles ahora: ${s.role_label||'sin asignar'}.</div>
       </div>
       <div>
         <label class="set-label">Modelo de Claude <span style="color:var(--muted);font-size:11px">· solo si Claude está activo</span></label>
@@ -637,6 +662,9 @@ async function saveSettings() {
     use_groq: document.getElementById('setUseGroq').checked,
     use_cerebras: document.getElementById('setUseCerebras').checked,
     use_openrouter: document.getElementById('setUseOpenrouter').checked,
+    entry_provider: document.getElementById('setEntryProvider').value,
+    exit_provider: document.getElementById('setExitProvider').value,
+    sol_provider: document.getElementById('setSolProvider').value,
   };
   const msg = document.getElementById('setMsg');
   msg.textContent = 'Guardando...'; msg.style.color = 'var(--muted)';

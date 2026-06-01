@@ -161,6 +161,15 @@ def provider_label() -> str:
     return parts[0]
 
 
+def role_label() -> str:
+    """Resumen de la asignacion de modelos por tarea."""
+    return (
+        f"entrada={config.LLM_ENTRY_PROVIDER}, "
+        f"salida={config.LLM_EXIT_PROVIDER}, "
+        f"sol={config.LLM_SOL_PROVIDER}"
+    )
+
+
 def _supports_thinking(model: str) -> bool:
     """Opus 4.x y Sonnet 4.6 soportan adaptive thinking; Haiku no."""
     m = model.lower()
@@ -389,8 +398,8 @@ async def sol_market_read(m: Dict[str, Any], log_fn=None) -> Optional[Dict[str, 
         f"- Indice miedo/codicia: {m.get('fear_greed')} ({m.get('fear_greed_label')})\n\n"
         f"¿Es buen momento para mantener/acumular SOL? Da tu lectura."
     )
-    # Usa el pool de IAs (Claude si esta on, si no Gemini/Groq/Cerebras con rotacion)
-    text = await _ask_llm(SOL_MARKET_SYSTEM, user_msg, log_fn, max_tokens=1500)
+    # SOL usa su proveedor favorito primero; si falla, cae al pool de respaldo.
+    text = await _ask_llm(SOL_MARKET_SYSTEM, user_msg, log_fn, max_tokens=1500, role="sol")
     if not text:
         return None
     data = _extract_tagged_json(text, "verdict") or _extract_verdict_json(text)
@@ -453,8 +462,9 @@ async def llm_review(analysis, log_fn=None) -> Optional[Dict[str, Any]]:
 
     user_msg = _build_user_message(analysis)
 
-    # 1) Claude (de pago) si hay key
-    if _claude_available():
+    # 1) Claude (de pago) solo si esta activo y asignado a entrada/auto.
+    entry_provider = _provider_preference("entry")
+    if _claude_available() and entry_provider in ("claude", "auto"):
         try:
             client = _get_client()
             model = config.LLM_MODEL
@@ -470,9 +480,17 @@ async def llm_review(analysis, log_fn=None) -> Optional[Dict[str, Any]]:
         except Exception as e:
             log_fn("WARNING", f"Claude fallo ({e})" + (" - probando Gemini gratis" if _gemini_available() else ""))
 
-    # 2) Pool de IAs GRATIS (Gemini, Groq, Cerebras, OpenRouter) con rotacion automatica
+    # 2) Pool de IAs GRATIS. Entrada intenta primero el proveedor asignado.
     if _any_free_available():
-        text = await _ask_pool(_build_system_prompt(), user_msg, 2048, log_fn)
+        text = await _ask_pool(_build_system_prompt(), user_msg, 2048, log_fn, role="entry")
+        if text:
+            data = _extract_verdict_json(text)
+            if data:
+                return _sanitize(data)
+
+    # 3) Si entrada tenia un proveedor gratis favorito y todo fallo, Claude queda como ultimo respaldo.
+    if _claude_available() and entry_provider not in ("claude", "auto"):
+        text = await _ask_llm(_build_system_prompt(), user_msg, log_fn, max_tokens=2048, role="claude")
         if text:
             data = _extract_verdict_json(text)
             if data:
@@ -600,48 +618,75 @@ async def _openai_ask(name: str, base_url: str, model: str, key_raw: str, label:
 
 
 def _free_providers() -> list:
-    """IAs gratis disponibles, cada una con una llamada uniforme (system, user, max_tokens, log)."""
+    """IAs gratis disponibles, cada una con una llamada uniforme (system, user, max_tokens, log).
+    Cada item es (id, etiqueta, callable)."""
     provs = []
     if _gemini_available():
-        provs.append(("Gemini gratis", _gemini_ask))
+        provs.append(("gemini", "Gemini gratis", _gemini_ask))
     if _groq_available():
-        provs.append((f"Groq ({config.GROQ_MODEL})",
+        provs.append(("groq", f"Groq ({config.GROQ_MODEL})",
                       lambda s, u, m, lf: _openai_ask("groq", config.GROQ_BASE_URL, config.GROQ_MODEL,
                                                       config.GROQ_API_KEY, "Groq", s, u, m, lf)))
     if _cerebras_available():
-        provs.append((f"Cerebras ({config.CEREBRAS_MODEL})",
+        provs.append(("cerebras", f"Cerebras ({config.CEREBRAS_MODEL})",
                       lambda s, u, m, lf: _openai_ask("cerebras", config.CEREBRAS_BASE_URL, config.CEREBRAS_MODEL,
                                                       config.CEREBRAS_API_KEY, "Cerebras", s, u, m, lf)))
     if _openrouter_available():
-        provs.append((f"OpenRouter ({config.OPENROUTER_MODEL})",
+        provs.append(("openrouter", f"OpenRouter ({config.OPENROUTER_MODEL})",
                       lambda s, u, m, lf: _openai_ask("openrouter", config.OPENROUTER_BASE_URL, config.OPENROUTER_MODEL,
                                                       config.OPENROUTER_API_KEY, "OpenRouter", s, u, m, lf)))
     return provs
 
 
-async def _ask_pool(system_prompt: str, user_msg: str, max_tokens: int, log_fn) -> Optional[str]:
-    """Rota entre las IAs gratis; si una falla o llega a su limite, salta a la siguiente. Nunca para."""
+def _provider_preference(role: str) -> str:
+    role = (role or "auto").lower()
+    if role in ("gemini", "groq", "cerebras", "openrouter", "claude", "auto"):
+        return role
+    if role == "entry":
+        return (config.LLM_ENTRY_PROVIDER or "gemini").lower()
+    if role == "exit":
+        return (config.LLM_EXIT_PROVIDER or "groq").lower()
+    if role == "sol":
+        return (config.LLM_SOL_PROVIDER or "cerebras").lower()
+    return "auto"
+
+
+async def _ask_pool(system_prompt: str, user_msg: str, max_tokens: int, log_fn, role: str = "auto") -> Optional[str]:
+    """Usa el proveedor favorito para la tarea; si falla, salta al resto. Nunca para."""
     provs = _free_providers()
     if not provs:
         return None
     n = len(provs)
-    start = _pool_idx[0] % n
-    _pool_idx[0] = (start + 1) % n
-    for off in range(n):
-        label, call = provs[(start + off) % n]
+    preferred = _provider_preference(role)
+
+    if preferred != "auto":
+        preferred_items = [p for p in provs if p[0] == preferred]
+        other_items = [p for p in provs if p[0] != preferred]
+        ordered = preferred_items + other_items
+    else:
+        start = _pool_idx[0] % n
+        _pool_idx[0] = (start + 1) % n
+        ordered = [provs[(start + off) % n] for off in range(n)]
+
+    if not ordered:
+        ordered = provs
+
+    for _, label, call in ordered:
         text = await call(system_prompt, user_msg, max_tokens, log_fn)
         if text:
-            log_fn("INFO", f"LLM: {label} respondio")
+            role_txt = {"entry": "entrada", "exit": "salida", "sol": "SOL"}.get(role, "pool")
+            log_fn("INFO", f"LLM [{role_txt}]: {label} respondio")
             return text
-        if n > 1:
+        if len(ordered) > 1:
             log_fn("INFO", f"{label} sin respuesta - salto al siguiente proveedor")
     return None
 
 
-async def _ask_llm(system_prompt: str, user_msg: str, log_fn, max_tokens: int = 1300) -> Optional[str]:
+async def _ask_llm(system_prompt: str, user_msg: str, log_fn, max_tokens: int = 1300, role: str = "auto") -> Optional[str]:
     """Claude (si esta on) y si no, el pool de IAs gratis con rotacion. Devuelve texto o None."""
-    # 1) Claude premium si esta activo (normalmente off: sin saldo)
-    if _claude_available():
+    preferred = _provider_preference(role)
+    # 1) Claude premium si esta activo y es favorito/auto (normalmente off: sin saldo)
+    if _claude_available() and preferred in ("claude", "auto"):
         try:
             client = _get_client()
             kwargs = dict(
@@ -662,7 +707,24 @@ async def _ask_llm(system_prompt: str, user_msg: str, log_fn, max_tokens: int = 
         except Exception as e:
             log_fn("WARNING", f"Claude (analisis) fallo: {e}")
     # 2) Pool de IAs gratis con rotacion + failover (nunca para)
-    return await _ask_pool(system_prompt, user_msg, max_tokens, log_fn)
+    text = await _ask_pool(system_prompt, user_msg, max_tokens, log_fn, role=role)
+    if text:
+        return text
+
+    # 3) Si el proveedor favorito era gratis y todo fallo, probar Claude como ultimo respaldo si esta activo.
+    if _claude_available() and preferred not in ("claude", "auto"):
+        try:
+            client = _get_client()
+            resp = await client.messages.create(
+                model=config.LLM_MODEL,
+                max_tokens=max_tokens,
+                system=[{"type": "text", "text": system_prompt, "cache_control": {"type": "ephemeral"}}],
+                messages=[{"role": "user", "content": user_msg}],
+            )
+            return next((b.text for b in resp.content if b.type == "text"), None)
+        except Exception as e:
+            log_fn("WARNING", f"Claude (respaldo) fallo: {e}")
+    return None
 
 
 SOL_EXPERT_SYSTEM = """Eres un analista de Solana (SOL) de primer nivel, con vision integral: tecnica, fundamental, on-chain, DeFi y de sentimiento. Te doy un dossier con todos los datos publicos disponibles y debes dar un analisis EXPERTO y HONESTO sobre SOL.
@@ -733,7 +795,7 @@ async def exit_review(pos: Dict, log_fn=None, market: Optional[Dict] = None) -> 
     lines.append("Decide: vender ya o mantener, y ajusta el target/stop.")
     msg = "\n".join(lines)
 
-    text = await _ask_llm(EXIT_SYSTEM, msg, log_fn, max_tokens=3000)
+    text = await _ask_llm(EXIT_SYSTEM, msg, log_fn, max_tokens=3000, role="exit")
     if not text:
         return None
     data = _extract_tagged_json(text, "exit")
@@ -762,7 +824,7 @@ async def sol_expert_analysis(dossier: str, log_fn=None) -> Optional[Dict[str, A
             pass
     if not (config.ENABLE_LLM_REVIEW and (_claude_available() or _any_free_available())):
         return None
-    text = await _ask_llm(SOL_EXPERT_SYSTEM, dossier, log_fn, max_tokens=4000)
+    text = await _ask_llm(SOL_EXPERT_SYSTEM, dossier, log_fn, max_tokens=4000, role="sol")
     if not text:
         return None
     data = _extract_tagged_json(text, "expert")
