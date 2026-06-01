@@ -45,7 +45,7 @@ DIP_MAX_1H = float(os.getenv("DIP_MAX_1H", "-3"))              # y estar bajando
 #   como evoluciona (deja correr si sube fuerte, aprieta si se debilita).
 # Las reglas rapidas (cada PRICE_CHECK_INTERVAL seg) ejecutan esos niveles AL INSTANTE.
 ENABLE_AI_EXIT = os.getenv("ENABLE_AI_EXIT", "true").lower() == "true"
-AI_EXIT_INTERVAL = int(os.getenv("AI_EXIT_INTERVAL", "90"))       # la IA re-evalua cada posicion cada X seg
+AI_EXIT_INTERVAL = int(os.getenv("AI_EXIT_INTERVAL", "60"))       # la IA re-evalua cada posicion cada X seg
 AI_EXIT_MIN_CONFIDENCE = float(os.getenv("AI_EXIT_MIN_CONFIDENCE", "60"))  # solo vende si la IA esta segura
 # La IA mueve el objetivo y el stop (regla dinamica). Si lo apagas, solo decide vender/mantener.
 ENABLE_AI_DYNAMIC_LEVELS = os.getenv("ENABLE_AI_DYNAMIC_LEVELS", "true").lower() == "true"
