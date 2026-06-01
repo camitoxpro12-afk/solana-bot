@@ -100,6 +100,15 @@ def init_db():
                 reason TEXT,
                 added_at TEXT DEFAULT (datetime('now'))
             );
+
+            CREATE TABLE IF NOT EXISTS favorites (
+                address TEXT PRIMARY KEY,
+                symbol TEXT,
+                name TEXT,
+                wins INTEGER DEFAULT 0,
+                last_pnl_pct REAL DEFAULT 0,
+                updated_at TEXT DEFAULT (datetime('now'))
+            );
         """)
         # Seed default learning weights if not present
         for factor, weight in DEFAULT_WEIGHTS.items():
@@ -226,6 +235,16 @@ def update_position_price(position_id: int, current_price_usd: float):
         conn.execute(
             "UPDATE positions SET current_price_usd = ? WHERE id = ?",
             (current_price_usd, position_id)
+        )
+        conn.commit()
+
+
+def update_position_levels(position_id: int, target_price_usd: float, stop_price_usd: float):
+    """Ajusta el objetivo (take-profit) y el stop de una posicion. Lo usa la IA dinamica."""
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE positions SET target_price_usd = ?, stop_price_usd = ? WHERE id = ?",
+            (target_price_usd, stop_price_usd, position_id)
         )
         conn.commit()
 
@@ -428,6 +447,45 @@ def get_blacklist(limit: int = 100) -> List[Dict]:
             "SELECT * FROM blacklist ORDER BY added_at DESC LIMIT ?", (limit,)
         ).fetchall()
     return [dict(r) for r in rows]
+
+
+# ── Favoritas (monedas ganadoras que se re-analizan para volver a entrar) ───────
+
+def add_favorite(address: str, symbol: str = "", name: str = "", pnl_pct: float = 0.0):
+    """Guarda/actualiza una moneda ganadora. Suma una victoria cada vez."""
+    with get_conn() as conn:
+        conn.execute(
+            """INSERT INTO favorites (address, symbol, name, wins, last_pnl_pct, updated_at)
+               VALUES (?, ?, ?, 1, ?, datetime('now'))
+               ON CONFLICT(address) DO UPDATE SET
+                   wins = wins + 1,
+                   last_pnl_pct = excluded.last_pnl_pct,
+                   symbol = excluded.symbol,
+                   name = excluded.name,
+                   updated_at = datetime('now')""",
+            (address, symbol, name, pnl_pct)
+        )
+        conn.commit()
+
+
+def is_favorite(address: str) -> bool:
+    with get_conn() as conn:
+        row = conn.execute("SELECT 1 FROM favorites WHERE address = ?", (address,)).fetchone()
+    return row is not None
+
+
+def get_favorites(limit: int = 30) -> List[Dict]:
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT * FROM favorites ORDER BY wins DESC, updated_at DESC LIMIT ?", (limit,)
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def remove_favorite(address: str):
+    with get_conn() as conn:
+        conn.execute("DELETE FROM favorites WHERE address = ?", (address,))
+        conn.commit()
 
 
 # ── Bot state ─────────────────────────────────────────────────────────────────

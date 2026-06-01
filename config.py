@@ -38,12 +38,23 @@ STRATEGY = os.getenv("STRATEGY", "dip")
 DIP_MIN_24H_RISE = float(os.getenv("DIP_MIN_24H_RISE", "15"))  # la moneda debe haber subido >= X% en 24h
 DIP_MAX_1H = float(os.getenv("DIP_MAX_1H", "-3"))              # y estar bajando <= X% en 1h ahora (el retroceso)
 
-# === SALIDA CON IA (hibrido) ===
-# Ademas de las reglas (stop/TP/trailing, instantaneas), la IA revisa cada posicion
-# cada X seg y puede VENDER ANTES si ve la moneda debilitarse. NO bloquea las reglas.
+# === SALIDA CON IA (hibrido: la IA es el cerebro, las reglas el gatillo rapido) ===
+# La IA revisa cada posicion cada X seg: mira el precio, momentum, graficas, y decide.
+# - Puede VENDER YA si ve la moneda debilitarse.
+# - Y AJUSTA la regla dinamicamente: mueve el objetivo (take-profit) y el stop segun
+#   como evoluciona (deja correr si sube fuerte, aprieta si se debilita).
+# Las reglas rapidas (cada PRICE_CHECK_INTERVAL seg) ejecutan esos niveles AL INSTANTE.
 ENABLE_AI_EXIT = os.getenv("ENABLE_AI_EXIT", "true").lower() == "true"
-AI_EXIT_INTERVAL = int(os.getenv("AI_EXIT_INTERVAL", "180"))      # revisa cada posicion cada X seg (3 min)
+AI_EXIT_INTERVAL = int(os.getenv("AI_EXIT_INTERVAL", "90"))       # la IA re-evalua cada posicion cada X seg
 AI_EXIT_MIN_CONFIDENCE = float(os.getenv("AI_EXIT_MIN_CONFIDENCE", "60"))  # solo vende si la IA esta segura
+# La IA mueve el objetivo y el stop (regla dinamica). Si lo apagas, solo decide vender/mantener.
+ENABLE_AI_DYNAMIC_LEVELS = os.getenv("ENABLE_AI_DYNAMIC_LEVELS", "true").lower() == "true"
+
+# === MONEDAS FAVORITAS (las ganadoras se guardan y re-analizan para volver a entrar) ===
+# Si un trade cierra ganando >= este %, la moneda se guarda como "favorita" y el escaner
+# la vigila constantemente para re-entrar en su proxima bajada (re-trade).
+FAVORITE_MIN_WIN_PCT = float(os.getenv("FAVORITE_MIN_WIN_PCT", "5"))
+FAVORITE_RESCAN_MINUTES = float(os.getenv("FAVORITE_RESCAN_MINUTES", "3"))  # re-analiza favoritas cada X min
 # Concentracion de holders: si el top 10 de wallets posee mas de este % -> RECHAZO DURO.
 # Esas monedas son las que hacen RUG PULL (un solo duenyo tira todo el supply de golpe).
 # Bajado a 40 tras detectar que TODOS los rugs tenian holders muy concentrados.

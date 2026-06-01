@@ -23,6 +23,7 @@ from trader import (get_sol_price_eur, get_sol_price_usd, calculate_position_siz
                     buy_token, sell_token, check_sellable, swap_sol_to_usdc, swap_usdc_to_sol)
 from learner import run_learning_cycle, get_learning_summary
 from news import news_loop, get_recent_news, get_sol_sentiment, refresh_news
+from analyzer import fetch_dexscreener
 import llm_analyst
 import wallet
 
@@ -320,8 +321,13 @@ class BotEngine:
                                 trailing_active = True
 
                         # ── Decidir salida ──
-                        # Con trailing activo dejamos correr al ganador (sin TP fijo).
-                        if current_price >= pos["target_price_usd"] and not config.ENABLE_TRAILING_STOP:
+                        # El objetivo (take-profit) se respeta si la IA gestiona los niveles
+                        # (asi se ejecuta su target al instante) o si no hay trailing.
+                        ai_managed = (config.ENABLE_AI_EXIT and config.ENABLE_AI_DYNAMIC_LEVELS
+                                      and llm_analyst.is_enabled())
+                        take_profit_active = (not config.ENABLE_TRAILING_STOP) or ai_managed
+                        target = pos.get("target_price_usd") or 0
+                        if take_profit_active and target > 0 and current_price >= target:
                             await self._close_position(pos, current_price, "take_profit")
                         elif current_price <= effective_stop:
                             reason = "trailing_stop" if trailing_active else "stop_loss"
@@ -442,6 +448,16 @@ class BotEngine:
                     "WARNING",
                     f"🚫 {pos['token_symbol']} a la LISTA NEGRA (perdida {pnl_pct:.0f}%) - no se volvera a comprar"
                 )
+            # GANADORA: guardar como FAVORITA para vigilarla y volver a entrar en su proxima bajada
+            elif pnl_pct >= config.FAVORITE_MIN_WIN_PCT and not db.is_blacklisted(pos["token_address"]):
+                db.add_favorite(
+                    pos["token_address"], pos.get("token_symbol", ""),
+                    pos.get("token_name", ""), round(pnl_pct, 1)
+                )
+                await self.broadcast_log(
+                    "INFO",
+                    f"⭐ {pos['token_symbol']} guardada como FAVORITA (gano {pnl_pct:+.0f}%) - se vigilara para re-entrar"
+                )
 
             # Trigger learning after each trade
             run_learning_cycle()
@@ -526,18 +542,88 @@ class BotEngine:
             except asyncio.TimeoutError:
                 pass
 
+    async def _position_market(self, address: str) -> dict:
+        """Lee la grafica/momentum en vivo de la moneda (para que la IA decida con datos)."""
+        try:
+            pair = await fetch_dexscreener(address)
+        except Exception:
+            pair = None
+        if not pair:
+            return {}
+        pc = pair.get("priceChange", {}) or {}
+        txns = (pair.get("txns", {}) or {}).get("h1", {}) or {}
+        return {
+            "change_m5": pc.get("m5", 0) or 0,
+            "change_h1": pc.get("h1", 0) or 0,
+            "change_h6": pc.get("h6", 0) or 0,
+            "change_h24": pc.get("h24", 0) or 0,
+            "buys_h1": txns.get("buys", 0) or 0,
+            "sells_h1": txns.get("sells", 0) or 0,
+            "volume_h1": (pair.get("volume", {}) or {}).get("h1", 0) or 0,
+            "liquidity": (pair.get("liquidity", {}) or {}).get("usd", 0) or 0,
+        }
+
     async def _ai_review_positions(self):
         for pos in db.get_open_positions():
-            review = await llm_analyst.exit_review(pos, self._sync_log)
+            market = await self._position_market(pos["token_address"])
+            review = await llm_analyst.exit_review(pos, self._sync_log, market=market)
             if not review:
                 continue
+
+            cur = pos.get("current_price_usd") or pos["buy_price_usd"]
+
+            # 1) VENDER YA si la IA esta segura
             if review.get("action") == "sell" and review.get("confidence", 0) >= config.AI_EXIT_MIN_CONFIDENCE:
-                cur = pos.get("current_price_usd") or pos["buy_price_usd"]
                 await self.broadcast_log(
                     "TRADE",
                     f"🧠 La IA recomienda SALIR de {pos['token_symbol']} ({review['confidence']}%): {review['reason']}"
                 )
                 await self._close_position(pos, cur, "ai_exit")
+                continue
+
+            # 2) MANTENER + AJUSTAR la regla (objetivo/stop dinamicos)
+            if config.ENABLE_AI_DYNAMIC_LEVELS:
+                await self._apply_ai_levels(pos, review, cur)
+
+    async def _apply_ai_levels(self, pos: dict, review: dict, cur: float):
+        """Aplica el objetivo/stop que decide la IA. Las reglas rapidas los ejecutaran al instante."""
+        buy = pos.get("buy_price_usd") or 0
+        if buy <= 0 or cur <= 0:
+            return
+        tgt_pct = review.get("target_pct")
+        stp_pct = review.get("stop_pct")
+        new_target = pos.get("target_price_usd") or 0
+        new_stop = pos.get("stop_price_usd") or 0
+
+        if tgt_pct is not None:
+            new_target = buy * (1 + tgt_pct / 100.0)
+        if stp_pct is not None:
+            new_stop = buy * (1 + stp_pct / 100.0)
+
+        # Seguridad: el objetivo por encima del precio actual y el stop por debajo
+        # (si la IA quisiera salir ya, deberia usar action=sell, no el plan).
+        new_target = max(new_target, cur * 1.001)
+        new_stop = min(new_stop, cur * 0.999)
+        if new_stop <= 0:
+            new_stop = pos.get("stop_price_usd") or (buy * 0.85)
+
+        old_target = pos.get("target_price_usd") or 0
+        old_stop = pos.get("stop_price_usd") or 0
+        # Solo actualiza/loguea si el cambio es significativo (>1%)
+        changed = (
+            abs(new_target - old_target) > old_target * 0.01 or
+            abs(new_stop - old_stop) > old_stop * 0.01
+        )
+        if not changed:
+            return
+        db.update_position_levels(pos["id"], new_target, new_stop)
+        tgt_p = (new_target - buy) / buy * 100
+        stop_p = (new_stop - buy) / buy * 100
+        await self.broadcast_log(
+            "TRADE",
+            f"🧠 IA ajusta plan de {pos['token_symbol']}: objetivo {tgt_p:+.0f}% / stop {stop_p:+.0f}% | {review.get('reason','')}"
+        )
+        await self.broadcast("balance_update", await self.get_status())
 
     # ── Start / Stop ──────────────────────────────────────────────────────────
 
@@ -573,6 +659,8 @@ class BotEngine:
         protecciones.append(f"anti-rug (top10 max {config.MAX_TOP10_PCT:.0f}%)")
         bl_count = len(db.get_blacklist())
         protecciones.append(f"lista negra ({bl_count} vetadas)")
+        fav_count = len(db.get_favorites())
+        protecciones.append(f"favoritas ({fav_count} vigiladas)")
         if protecciones:
             await self.broadcast_log("INFO", "Protecciones activas: " + ", ".join(protecciones))
 
@@ -585,9 +673,11 @@ class BotEngine:
             )
 
         if config.ENABLE_AI_EXIT and llm_analyst.is_enabled():
+            modo_ia = "ajusta objetivo/stop y puede vender" if config.ENABLE_AI_DYNAMIC_LEVELS else "puede vender antes"
             await self.broadcast_log(
                 "INFO",
-                f"Salida con IA ACTIVA - la IA revisa cada posicion cada {config.AI_EXIT_INTERVAL//60} min y puede vender antes"
+                f"Salida con IA ACTIVA - re-evalua cada posicion cada {config.AI_EXIT_INTERVAL}s ({modo_ia}); "
+                f"el gatillo rapido la ejecuta cada {config.PRICE_CHECK_INTERVAL}s"
             )
 
         # Wallet: obligatoria solo en modo REAL; en simulacion es opcional.
@@ -670,12 +760,19 @@ def _compute_exit_plan(p: dict) -> dict:
     buy = p.get("buy_price_usd") or 0
     cur = p.get("current_price_usd") or buy
     high = max(p.get("highest_price_usd") or 0, cur, buy)
-    plan = {"partial_taken": bool(p.get("partial_taken"))}
+    ai_managed = (config.ENABLE_AI_EXIT and config.ENABLE_AI_DYNAMIC_LEVELS and llm_analyst.is_enabled())
+    plan = {"partial_taken": bool(p.get("partial_taken")), "ai_managed": ai_managed}
     if config.ENABLE_PARTIAL_TP and not p.get("partial_taken"):
         plan["partial_tp_price"] = round(buy * (1 + config.PARTIAL_TP_TRIGGER_PCT), 10)
         plan["partial_tp_pct"] = round(config.PARTIAL_TP_TRIGGER_PCT * 100)
+    # Objetivo (take-profit): activo si lo gestiona la IA o si no hay trailing
+    if ai_managed or not config.ENABLE_TRAILING_STOP:
+        plan["take_profit_price"] = p.get("target_price_usd")
+        tp = p.get("target_price_usd") or 0
+        plan["take_profit_pct"] = round(((tp - buy) / buy * 100), 1) if buy > 0 else 0
+    # Stop (con trailing como suelo si esta activo)
     if config.ENABLE_TRAILING_STOP:
-        plan["mode"] = "trailing"
+        plan["mode"] = "ia" if ai_managed else "trailing"
         plan["trailing_pct"] = round(config.TRAILING_STOP_PCT * 100)
         plan["peak_pct"] = round(((high - buy) / buy * 100), 1) if buy > 0 else 0
         if high > buy:  # el trailing solo se activa si entro en beneficio (igual que el monitor)
@@ -686,8 +783,7 @@ def _compute_exit_plan(p: dict) -> dict:
             plan["sell_price"] = p.get("stop_price_usd")
             plan["trailing_active"] = False
     else:
-        plan["mode"] = "fixed"
-        plan["take_profit_price"] = p.get("target_price_usd")
+        plan["mode"] = "ia" if ai_managed else "fixed"
         plan["sell_price"] = p.get("stop_price_usd")
     # % al que esta el nivel de venta respecto a la compra
     sp = plan.get("sell_price") or 0
@@ -713,6 +809,12 @@ async def get_logs(limit: int = 100):
 async def get_blacklist():
     """Monedas vetadas por rug pull / perdida grande (no se vuelven a comprar)."""
     return db.get_blacklist()
+
+
+@app.get("/api/favorites")
+async def get_favorites():
+    """Monedas ganadoras guardadas: se re-analizan para volver a entrar en su bajada."""
+    return db.get_favorites()
 
 
 @app.get("/api/learning")

@@ -566,18 +566,29 @@ Responde en espanol y TERMINA SIEMPRE con un JSON entre <expert></expert>:
 <expert>{"outlook":"alcista|neutral|bajista","recommendation":"comprar|acumular|mantener|esperar|reducir|vender","timeframe":"ej: dias a semanas","confidence":0-100,"summary":"2-4 frases","key_points":["punto1","punto2"],"risks":["riesgo1"]}</expert>"""
 
 
-EXIT_SYSTEM = """Eres un trader experto gestionando una posicion ABIERTA de memecoin en Solana. Te doy los datos en vivo y decides: VENDER YA ("sell") o MANTENER ("hold").
+EXIT_SYSTEM = """Eres un trader experto gestionando EN VIVO una posicion ABIERTA de memecoin en Solana, como un scalper que vigila la grafica. Tu trabajo: leer el estado y AJUSTAR EL PLAN.
 
-Vende si: el precio se aleja claramente de su maximo (impulso agotado / posible reversion), o ya hay buena ganancia y el riesgo de devolverla es alto, o lleva mucho tiempo cayendo sin rebotar. Manten si sigue con fuerza alcista o el retroceso es leve y normal.
+Decides DOS cosas:
+1. action: "sell" (vender YA todo) o "hold" (seguir dentro con el plan ajustado).
+2. El PLAN dinamico (donde poner el objetivo de ganancia y el stop):
+   - target_pct: a que % de ganancia (vs entrada) tomar beneficio. Ej: 20 = vender en +20%.
+   - stop_pct: a que % (vs entrada) cortar perdidas/asegurar. Negativo o positivo. Ej: -12 = cortar en -12%; 8 = asegurar ganancia vendiendo si cae a +8%.
 
-Recuerda: ya hay un stop-loss y un take-profit automaticos; tu SOLO decides si conviene salir ANTES de que se activen. Se decisivo y breve. Ante una posicion sana, manten.
+Como pensar (estilo scalping "comprar la bajada, vender el rebote"):
+- Si rebota con FUERZA (volumen y compras subiendo): deja correr -> sube el target y sube el stop detras del precio para proteger.
+- Si el rebote se AGOTA o se gira (cae del maximo, mas ventas que compras): aprieta el stop cerca del precio o vende ya.
+- Si lleva tiempo plano/cayendo sin reaccionar: mejor salir y buscar otra.
+- Si ya hay buena ganancia: protege subiendo el stop a positivo (asegura beneficio).
+
+Las reglas rapidas ejecutan tu target/stop AL INSTANTE; tu solo defines DONDE estan. Se decisivo y breve.
 
 Termina SIEMPRE con un JSON entre <exit></exit>:
-<exit>{"action":"sell"|"hold","confidence":entero 0-100,"reason":"explicacion breve en espanol"}</exit>"""
+<exit>{"action":"sell"|"hold","confidence":entero 0-100,"target_pct":numero,"stop_pct":numero,"reason":"explicacion breve en espanol"}</exit>"""
 
 
-async def exit_review(pos: Dict, log_fn=None) -> Optional[Dict[str, Any]]:
-    """La IA revisa una posicion abierta y decide salir antes o mantener. Devuelve {action, confidence, reason} o None."""
+async def exit_review(pos: Dict, log_fn=None, market: Optional[Dict] = None) -> Optional[Dict[str, Any]]:
+    """La IA revisa una posicion abierta: decide vender/mantener Y ajusta target/stop.
+    Devuelve {action, confidence, reason, target_pct, stop_pct} o None."""
     if log_fn is None:
         def log_fn(level, msg):
             pass
@@ -586,17 +597,33 @@ async def exit_review(pos: Dict, log_fn=None) -> Optional[Dict[str, Any]]:
     buy = pos.get("buy_price_usd") or 0
     cur = pos.get("current_price_usd") or buy
     high = pos.get("highest_price_usd") or buy
+    tgt = pos.get("target_price_usd") or 0
+    stp = pos.get("stop_price_usd") or 0
     pnl = ((cur - buy) / buy * 100) if buy > 0 else 0
     peak = ((high - buy) / buy * 100) if buy > 0 else 0
     drawdown = ((cur - high) / high * 100) if high > 0 else 0
-    msg = (
-        f"Posicion abierta de {pos.get('token_symbol', '?')}:\n"
-        f"- Precio de entrada: ${buy:.8f}\n"
-        f"- Precio actual: ${cur:.8f}\n"
-        f"- Ganancia/perdida ahora: {pnl:+.1f}%\n"
-        f"- Maximo alcanzado: {peak:+.1f}% (ahora esta {drawdown:+.1f}% por debajo de ese maximo)\n"
-        f"¿Vender ya o mantener?"
-    )
+    cur_tgt_pct = ((tgt - buy) / buy * 100) if buy > 0 else 0
+    cur_stop_pct = ((stp - buy) / buy * 100) if buy > 0 else 0
+
+    lines = [
+        f"Posicion abierta de {pos.get('token_symbol', '?')}:",
+        f"- Precio de entrada: ${buy:.8f}",
+        f"- Precio actual: ${cur:.8f}",
+        f"- Ganancia/perdida ahora: {pnl:+.1f}%",
+        f"- Maximo alcanzado: {peak:+.1f}% (ahora {drawdown:+.1f}% por debajo de ese maximo)",
+        f"- Plan ACTUAL: objetivo en {cur_tgt_pct:+.0f}%, stop en {cur_stop_pct:+.0f}%",
+    ]
+    if market:
+        lines.append(
+            "- Grafica/momentum: "
+            f"5m {market.get('change_m5', 0):+.1f}%, 1h {market.get('change_h1', 0):+.1f}%, "
+            f"6h {market.get('change_h6', 0):+.1f}%, 24h {market.get('change_h24', 0):+.1f}% | "
+            f"compras/ventas 1h: {market.get('buys_h1', 0)}/{market.get('sells_h1', 0)} | "
+            f"volumen 1h: ${market.get('volume_h1', 0):,.0f} | liquidez: ${market.get('liquidity', 0):,.0f}"
+        )
+    lines.append("Decide: vender ya o mantener, y ajusta el target/stop.")
+    msg = "\n".join(lines)
+
     text = await _ask_llm(EXIT_SYSTEM, msg, log_fn, max_tokens=3000)
     if not text:
         return None
@@ -608,6 +635,13 @@ async def exit_review(pos: Dict, log_fn=None) -> Optional[Dict[str, Any]]:
         data["confidence"] = max(0, min(100, int(data.get("confidence", 0))))
     except (ValueError, TypeError):
         data["confidence"] = 0
+    # target/stop opcionales: se validan/limitan en quien los aplica
+    for k in ("target_pct", "stop_pct"):
+        if data.get(k) is not None:
+            try:
+                data[k] = float(data[k])
+            except (ValueError, TypeError):
+                data[k] = None
     data["reason"] = str(data.get("reason", ""))[:300]
     return data
 

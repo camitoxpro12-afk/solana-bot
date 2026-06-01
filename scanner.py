@@ -9,7 +9,7 @@ from typing import List, Dict, Optional, Set, Callable, Awaitable
 import httpx
 
 import config
-from database import was_token_seen, mark_token_seen, add_log, is_blacklisted
+from database import was_token_seen, mark_token_seen, add_log, is_blacklisted, get_favorites
 from analyzer import analyze_token
 from news import get_token_sentiment_boost
 
@@ -171,6 +171,19 @@ async def scan_new_tokens(
                 seen_this_scan.add(addr)
                 candidates.append(token)
 
+    # FAVORITAS: monedas que ya ganaron. Se re-analizan SIEMPRE (aunque no esten en
+    # tendencia ahora) para volver a entrar en su proxima bajada (re-trade).
+    for fav in get_favorites(limit=20):
+        addr = fav.get("address", "")
+        if addr and addr not in seen_this_scan and addr not in _SKIP_MINTS and not is_blacklisted(addr):
+            seen_this_scan.add(addr)
+            candidates.append({
+                "address": addr,
+                "name": fav.get("name") or fav.get("symbol") or "",
+                "symbol": fav.get("symbol", ""),
+                "source": "favorito", "category": "favorite", "created_at_ms": 0,
+            })
+
     new_count = 0
     for token in candidates:
         addr = token["address"]
@@ -180,19 +193,21 @@ async def scan_new_tokens(
         if is_blacklisted(addr):
             continue
 
-        # Nuevas: analizar una sola vez. Trending/top: re-evaluar con cooldown.
+        # Nuevas: analizar una sola vez. Trending/top/favoritas: re-evaluar con cooldown.
         if category == "new":
             if addr in _known_addresses or was_token_seen(addr):
                 continue
             _known_addresses.add(addr)
         else:
-            if (time.time() - _last_analyzed.get(addr, 0)) < config.RESCAN_TRENDING_MINUTES * 60:
+            rescan_min = (config.FAVORITE_RESCAN_MINUTES if category == "favorite"
+                          else config.RESCAN_TRENDING_MINUTES)
+            if (time.time() - _last_analyzed.get(addr, 0)) < rescan_min * 60:
                 continue
             _last_analyzed[addr] = time.time()
 
         new_count += 1
 
-        cat_tag = {"trending": "TREND", "top": "TOP", "new": "NEW"}.get(category, category)
+        cat_tag = {"trending": "TREND", "top": "TOP", "new": "NEW", "favorite": "FAV"}.get(category, category)
         add_log("INFO", f"Analizando [{cat_tag}]: {token.get('name', addr[:8])} ({addr[:8]}...)")
 
         # Notify dashboard that we're analyzing this token

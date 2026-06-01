@@ -249,12 +249,14 @@
         <div class="tabs">
           <div class="tab active" onclick="switchTab('solmarket')">📈 Mercado SOL</div>
           <div class="tab" onclick="switchTab('trades')">Historial</div>
+          <div class="tab" onclick="switchTab('favorites')">⭐ Favoritas</div>
           <div class="tab" onclick="switchTab('learning')">Aprendizaje</div>
           <div class="tab" onclick="switchTab('news')">Noticias</div>
           <div class="tab" onclick="switchTab('settings')">⚙️ Ajustes</div>
         </div>
         <div id="tab-solmarket"><div class="empty">Cargando mercado de SOL...</div></div>
         <div id="tab-trades" style="display:none"><div class="empty">Sin trades aun</div></div>
+        <div id="tab-favorites" style="display:none"></div>
         <div id="tab-learning" style="display:none"></div>
         <div id="tab-news" style="display:none"></div>
         <div id="tab-settings" style="display:none"></div>
@@ -444,16 +446,22 @@ function exitPlanHtml(plan) {
   } else if (plan.partial_tp_price) {
     lines.push(`🎯 Vende la MITAD si sube a +${plan.partial_tp_pct}% (${px(plan.partial_tp_price)})`);
   }
-  if (plan.mode === 'trailing') {
-    if (plan.trailing_active) {
-      lines.push(`📉 Vende si baja a ${px(plan.sell_price)} (${plan.sell_at_pct>=0?'+':''}${plan.sell_at_pct}%) — trailing ${plan.trailing_pct}% bajo el pico (+${plan.peak_pct}%)`);
-    } else {
-      lines.push(`🛡 Stop-loss en ${px(plan.sell_price)} (${plan.sell_at_pct}%). El trailing se activará cuando entre en ganancia.`);
-    }
-  } else if (plan.take_profit_price) {
-    lines.push(`🎯 Vende todo en ${px(plan.take_profit_price)}`);
+  // Objetivo de ganancia (take-profit): visible si la IA lo gestiona o si no hay trailing
+  if (plan.take_profit_price) {
+    const tp = plan.take_profit_pct;
+    const tpTxt = (tp!==undefined && tp!==null) ? ` (+${tp}%)` : '';
+    lines.push(`🎯 Vende todo en ${px(plan.take_profit_price)}${tpTxt}`);
   }
-  return `<div style="font-size:11px;color:var(--muted);margin-top:8px;border-top:1px solid var(--border);padding-top:7px;line-height:1.7"><b style="color:var(--text)">📋 Plan de salida:</b><br>${lines.join('<br>')}</div>`;
+  // Stop / trailing
+  if (plan.trailing_active) {
+    lines.push(`📉 Protege: vende si baja a ${px(plan.sell_price)} (${plan.sell_at_pct>=0?'+':''}${plan.sell_at_pct}%) — sigue al precio ${plan.trailing_pct}% bajo el pico (+${plan.peak_pct}%)`);
+  } else if (plan.sell_price) {
+    lines.push(`🛡 Stop en ${px(plan.sell_price)} (${plan.sell_at_pct>=0?'+':''}${plan.sell_at_pct}%)`);
+  }
+  const titulo = plan.ai_managed
+    ? '🧠 Plan dinámico (la IA lo ajusta en vivo)'
+    : '📋 Plan de salida:';
+  return `<div style="font-size:11px;color:var(--muted);margin-top:8px;border-top:1px solid var(--border);padding-top:7px;line-height:1.7"><b style="color:var(--text)">${titulo}</b><br>${lines.join('<br>')}</div>`;
 }
 
 function updatePositionPnl(d) {
@@ -527,13 +535,41 @@ function switchTab(name) {
   activeTab = name;
   document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
   event.target.classList.add('active');
-  ['solmarket','trades','learning','news','settings'].forEach(n=>{
+  ['solmarket','trades','favorites','learning','news','settings'].forEach(n=>{
     document.getElementById('tab-'+n).style.display = n===name?'block':'none';
   });
   if (name==='learning') loadLearning();
   if (name==='news') loadNews();
   if (name==='solmarket') loadSolMarket();
   if (name==='settings') loadSettings();
+  if (name==='favorites') loadFavorites();
+}
+
+async function loadFavorites() {
+  const c = document.getElementById('tab-favorites');
+  let favs = [], bl = [];
+  try { favs = await (await fetch('/api/favorites')).json(); } catch(e){}
+  try { bl = await (await fetch('/api/blacklist')).json(); } catch(e){}
+  let html = '<div style="font-size:12px;color:var(--muted);margin-bottom:10px">⭐ Monedas que ya te hicieron ganar. El bot las vigila para volver a entrar en su próxima bajada.</div>';
+  if (!favs.length) {
+    html += '<div class="empty">Aún no hay favoritas. Aparecerán cuando un trade cierre ganando.</div>';
+  } else {
+    html += favs.map(f => `<div class="trade-row">
+      <div><div class="tname">⭐ ${escapeHtml(f.symbol||f.name||'?')}</div>
+      <div style="color:var(--muted);font-size:11px">${f.wins} victoria(s) · vigilada ${timeAgo(f.updated_at)}</div></div>
+      <div style="text-align:right"><div class="value green" style="font-size:13px">última +${(f.last_pnl_pct||0).toFixed(0)}%</div></div>
+    </div>`).join('');
+  }
+  html += `<div style="font-size:12px;color:var(--muted);margin:16px 0 10px;border-top:1px solid var(--border);padding-top:12px">🚫 Lista negra (${bl.length}) — vetadas por rug/pérdida grande, NO se vuelven a comprar.</div>`;
+  if (bl.length) {
+    html += bl.map(b => `<div class="trade-row">
+      <div><div class="tname">🚫 ${escapeHtml(b.symbol||'?')}</div>
+      <div style="color:var(--muted);font-size:11px">${escapeHtml(b.reason||'')} · ${timeAgo(b.added_at)}</div></div>
+    </div>`).join('');
+  } else {
+    html += '<div class="empty">Ninguna moneda vetada (de momento).</div>';
+  }
+  c.innerHTML = html;
 }
 
 async function loadSettings() {
