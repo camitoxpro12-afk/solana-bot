@@ -114,9 +114,20 @@ def _score_holder_distribution(report: Optional[Dict]) -> tuple[float, float, in
         return 3.0, 50.0, 0
 
     top_holders = report.get("topHolders", [])
-    # Exclude LP pools from top holder calculation
-    non_lp = [h for h in top_holders if not h.get("isLP", False) and not h.get("isDex", False)]
-    top10_pct = sum(h.get("pct", 0) for h in non_lp[:10])
+    # Exclude LP pools and de-duplicate addresses; RugCheck can occasionally
+    # repeat holder rows, which otherwise produces impossible totals >100%.
+    seen = set()
+    non_lp = []
+    for h in top_holders:
+        if h.get("isLP", False) or h.get("isDex", False):
+            continue
+        ident = h.get("address") or h.get("owner") or h.get("wallet") or h.get("account")
+        if ident and ident in seen:
+            continue
+        if ident:
+            seen.add(ident)
+        non_lp.append(h)
+    top10_pct = min(100.0, sum((h.get("pct", 0) or 0) for h in non_lp[:10]))
 
     holder_count = len(top_holders)  # rugcheck doesn't give exact count
 
