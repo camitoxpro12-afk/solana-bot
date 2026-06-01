@@ -566,6 +566,52 @@ Responde en espanol y TERMINA SIEMPRE con un JSON entre <expert></expert>:
 <expert>{"outlook":"alcista|neutral|bajista","recommendation":"comprar|acumular|mantener|esperar|reducir|vender","timeframe":"ej: dias a semanas","confidence":0-100,"summary":"2-4 frases","key_points":["punto1","punto2"],"risks":["riesgo1"]}</expert>"""
 
 
+EXIT_SYSTEM = """Eres un trader experto gestionando una posicion ABIERTA de memecoin en Solana. Te doy los datos en vivo y decides: VENDER YA ("sell") o MANTENER ("hold").
+
+Vende si: el precio se aleja claramente de su maximo (impulso agotado / posible reversion), o ya hay buena ganancia y el riesgo de devolverla es alto, o lleva mucho tiempo cayendo sin rebotar. Manten si sigue con fuerza alcista o el retroceso es leve y normal.
+
+Recuerda: ya hay un stop-loss y un take-profit automaticos; tu SOLO decides si conviene salir ANTES de que se activen. Se decisivo y breve. Ante una posicion sana, manten.
+
+Termina SIEMPRE con un JSON entre <exit></exit>:
+<exit>{"action":"sell"|"hold","confidence":entero 0-100,"reason":"explicacion breve en espanol"}</exit>"""
+
+
+async def exit_review(pos: Dict, log_fn=None) -> Optional[Dict[str, Any]]:
+    """La IA revisa una posicion abierta y decide salir antes o mantener. Devuelve {action, confidence, reason} o None."""
+    if log_fn is None:
+        def log_fn(level, msg):
+            pass
+    if not (config.ENABLE_LLM_REVIEW and (_claude_available() or _gemini_available())):
+        return None
+    buy = pos.get("buy_price_usd") or 0
+    cur = pos.get("current_price_usd") or buy
+    high = pos.get("highest_price_usd") or buy
+    pnl = ((cur - buy) / buy * 100) if buy > 0 else 0
+    peak = ((high - buy) / buy * 100) if buy > 0 else 0
+    drawdown = ((cur - high) / high * 100) if high > 0 else 0
+    msg = (
+        f"Posicion abierta de {pos.get('token_symbol', '?')}:\n"
+        f"- Precio de entrada: ${buy:.8f}\n"
+        f"- Precio actual: ${cur:.8f}\n"
+        f"- Ganancia/perdida ahora: {pnl:+.1f}%\n"
+        f"- Maximo alcanzado: {peak:+.1f}% (ahora esta {drawdown:+.1f}% por debajo de ese maximo)\n"
+        f"¿Vender ya o mantener?"
+    )
+    text = await _ask_llm(EXIT_SYSTEM, msg, log_fn, max_tokens=3000)
+    if not text:
+        return None
+    data = _extract_tagged_json(text, "exit")
+    if not data:
+        return None
+    data["action"] = "sell" if data.get("action") == "sell" else "hold"
+    try:
+        data["confidence"] = max(0, min(100, int(data.get("confidence", 0))))
+    except (ValueError, TypeError):
+        data["confidence"] = 0
+    data["reason"] = str(data.get("reason", ""))[:300]
+    return data
+
+
 async def sol_expert_analysis(dossier: str, log_fn=None) -> Optional[Dict[str, Any]]:
     """Analisis experto de SOL usando el proveedor activo. Devuelve dict o None."""
     if log_fn is None:

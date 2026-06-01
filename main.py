@@ -500,6 +500,33 @@ class BotEngine:
                 })
                 await self.broadcast("balance_update", await self.get_status())
 
+    # ── Revision de salida con IA (hibrido: complementa las reglas) ─────────────
+
+    async def ai_exit_loop(self):
+        while not self.stop_event.is_set():
+            try:
+                if config.ENABLE_AI_EXIT and llm_analyst.is_enabled():
+                    await self._ai_review_positions()
+            except Exception as e:
+                db.add_log("ERROR", f"Error en revision IA de salidas: {e}")
+            try:
+                await asyncio.wait_for(self.stop_event.wait(), timeout=config.AI_EXIT_INTERVAL)
+            except asyncio.TimeoutError:
+                pass
+
+    async def _ai_review_positions(self):
+        for pos in db.get_open_positions():
+            review = await llm_analyst.exit_review(pos, self._sync_log)
+            if not review:
+                continue
+            if review.get("action") == "sell" and review.get("confidence", 0) >= config.AI_EXIT_MIN_CONFIDENCE:
+                cur = pos.get("current_price_usd") or pos["buy_price_usd"]
+                await self.broadcast_log(
+                    "TRADE",
+                    f"🧠 La IA recomienda SALIR de {pos['token_symbol']} ({review['confidence']}%): {review['reason']}"
+                )
+                await self._close_position(pos, cur, "ai_exit")
+
     # ── Start / Stop ──────────────────────────────────────────────────────────
 
     async def start(self):
@@ -542,6 +569,12 @@ class BotEngine:
                 f"Swing de SOL ACTIVO ({config.SOL_SWING_PCT*100:.0f}% del balance) - estado: {estado}"
             )
 
+        if config.ENABLE_AI_EXIT and llm_analyst.is_enabled():
+            await self.broadcast_log(
+                "INFO",
+                f"Salida con IA ACTIVA - la IA revisa cada posicion cada {config.AI_EXIT_INTERVAL//60} min y puede vender antes"
+            )
+
         # Wallet: obligatoria solo en modo REAL; en simulacion es opcional.
         pk = (config.PRIVATE_KEY or "").strip()
         if pk and pk != "TU_CLAVE_PRIVADA_AQUI":
@@ -565,6 +598,7 @@ class BotEngine:
             loop.create_task(self.monitor_positions()),
             loop.create_task(news_loop()),
             loop.create_task(self.sol_swing_loop()),
+            loop.create_task(self.ai_exit_loop()),
         ]
 
     async def stop(self):

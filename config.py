@@ -37,6 +37,13 @@ MAX_PUMP_1H_PCT = float(os.getenv("MAX_PUMP_1H_PCT", "60"))
 STRATEGY = os.getenv("STRATEGY", "dip")
 DIP_MIN_24H_RISE = float(os.getenv("DIP_MIN_24H_RISE", "15"))  # la moneda debe haber subido >= X% en 24h
 DIP_MAX_1H = float(os.getenv("DIP_MAX_1H", "-3"))              # y estar bajando <= X% en 1h ahora (el retroceso)
+
+# === SALIDA CON IA (hibrido) ===
+# Ademas de las reglas (stop/TP/trailing, instantaneas), la IA revisa cada posicion
+# cada X seg y puede VENDER ANTES si ve la moneda debilitarse. NO bloquea las reglas.
+ENABLE_AI_EXIT = os.getenv("ENABLE_AI_EXIT", "true").lower() == "true"
+AI_EXIT_INTERVAL = int(os.getenv("AI_EXIT_INTERVAL", "180"))      # revisa cada posicion cada X seg (3 min)
+AI_EXIT_MIN_CONFIDENCE = float(os.getenv("AI_EXIT_MIN_CONFIDENCE", "60"))  # solo vende si la IA esta segura
 MAX_TOP10_PCT = float(os.getenv("MAX_TOP10_PCT", "45"))
 MIN_TOKEN_AGE_MINUTES = int(os.getenv("MIN_TOKEN_AGE_MINUTES", "20"))
 MAX_TOKEN_AGE_HOURS = int(os.getenv("MAX_TOKEN_AGE_HOURS", "48"))
