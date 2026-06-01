@@ -30,6 +30,13 @@ ENABLE_MARKET_FILTER = os.getenv("ENABLE_MARKET_FILTER", "true").lower() == "tru
 MARKET_FILTER_MIN_SCORE = float(os.getenv("MARKET_FILTER_MIN_SCORE", "45"))
 # Anti-FOMO: no comprar una moneda que ya subio demasiado en 1h (evita comprar el techo del pump)
 MAX_PUMP_1H_PCT = float(os.getenv("MAX_PUMP_1H_PCT", "60"))
+
+# === ESTRATEGIA DE ENTRADA ===
+# "dip"  = comprar la BAJADA de una moneda en tendencia (esperar retroceso) y vender el rebote.
+# "momentum" = comprar cuando sube (modo anterior).
+STRATEGY = os.getenv("STRATEGY", "dip")
+DIP_MIN_24H_RISE = float(os.getenv("DIP_MIN_24H_RISE", "15"))  # la moneda debe haber subido >= X% en 24h
+DIP_MAX_1H = float(os.getenv("DIP_MAX_1H", "-3"))              # y estar bajando <= X% en 1h ahora (el retroceso)
 MAX_TOP10_PCT = float(os.getenv("MAX_TOP10_PCT", "45"))
 MIN_TOKEN_AGE_MINUTES = int(os.getenv("MIN_TOKEN_AGE_MINUTES", "20"))
 MAX_TOKEN_AGE_HOURS = int(os.getenv("MAX_TOKEN_AGE_HOURS", "48"))

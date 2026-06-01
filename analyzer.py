@@ -338,7 +338,8 @@ async def analyze_token(address: str, news_sentiment: float = 2.5, category: str
 
     # Determine verdict
     verdict, reason = _determine_verdict(
-        total, float(liquidity_usd), age_minutes, mint_score, freeze_score, risks, category
+        total, float(liquidity_usd), age_minutes, mint_score, freeze_score, risks, category,
+        float(price_change_1h), float(price_change_24h)
     )
 
     return TokenAnalysis(
@@ -369,9 +370,10 @@ async def analyze_token(address: str, news_sentiment: float = 2.5, category: str
 
 def _determine_verdict(
     total_score: float, liquidity: float, age_minutes: float,
-    mint_score: float, freeze_score: float, risks: list, category: str = "new"
+    mint_score: float, freeze_score: float, risks: list, category: str = "new",
+    price_change_1h: float = 0.0, price_change_24h: float = 0.0
 ) -> tuple[str, str]:
-    # Descalificadores de SEGURIDAD (siempre estrictos, sin importar la categoria)
+    # Descalificadores de SEGURIDAD (siempre estrictos, sin importar la categoria/estrategia)
     if mint_score == 0.0:
         return "scam", "Mint authority activo - pueden crear tokens infinitos"
     if freeze_score == 0.0:
@@ -392,7 +394,17 @@ def _determine_verdict(
         if any(kw in risk.lower() for kw in critical_keywords):
             return "scam", f"Riesgo critico detectado: {risk}"
 
-    # Umbral de puntuacion: mas flexible para trending/top (ya tienen traccion probada)
+    # === ESTRATEGIA "DIP": comprar la bajada de una moneda en tendencia ===
+    if config.STRATEGY == "dip":
+        if total_score < 40:  # filtro minimo de calidad/seguridad
+            return "skip", f"Calidad baja: {total_score:.0f}/100"
+        if price_change_24h < config.DIP_MIN_24H_RISE:
+            return "skip", f"No esta en tendencia (24h {price_change_24h:+.0f}%, se busca >= +{config.DIP_MIN_24H_RISE:.0f}%)"
+        if price_change_1h > config.DIP_MAX_1H:
+            return "skip", f"Esperando el retroceso (1h {price_change_1h:+.0f}%, se compra cuando baje <= {config.DIP_MAX_1H:.0f}%)"
+        return "buy", f"DIP: subio +{price_change_24h:.0f}% en 24h y ahora retrocede {price_change_1h:+.0f}% en 1h - comprando la bajada"
+
+    # === ESTRATEGIA "MOMENTUM" (anterior): comprar cuando sube ===
     min_score = config.MIN_SCORE if category == "new" else config.MIN_SCORE_TRENDING
     cat_label = {"trending": "tendencia", "top": "top volumen", "new": "nueva"}.get(category, category)
     if total_score >= min_score:
