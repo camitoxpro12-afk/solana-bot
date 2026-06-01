@@ -24,6 +24,12 @@ MIN_SCORE_TRENDING = float(os.getenv("MIN_SCORE_TRENDING", "50"))  # umbral mas 
 
 # Nivel de riesgo del bot: conservador | balanceado | agresivo (ajusta umbrales y la actitud del LLM)
 RISK_MODE = os.getenv("RISK_MODE", "balanceado")
+
+# Filtro de mercado global: NO comprar memecoins cuando SOL esta bajista (caen mas en rojo)
+ENABLE_MARKET_FILTER = os.getenv("ENABLE_MARKET_FILTER", "true").lower() == "true"
+MARKET_FILTER_MIN_SCORE = float(os.getenv("MARKET_FILTER_MIN_SCORE", "45"))
+# Anti-FOMO: no comprar una moneda que ya subio demasiado en 1h (evita comprar el techo del pump)
+MAX_PUMP_1H_PCT = float(os.getenv("MAX_PUMP_1H_PCT", "60"))
 MAX_TOP10_PCT = float(os.getenv("MAX_TOP10_PCT", "45"))
 MIN_TOKEN_AGE_MINUTES = int(os.getenv("MIN_TOKEN_AGE_MINUTES", "20"))
 MAX_TOKEN_AGE_HOURS = int(os.getenv("MAX_TOKEN_AGE_HOURS", "48"))

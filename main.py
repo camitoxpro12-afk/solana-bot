@@ -158,6 +158,29 @@ class BotEngine:
         if any(p["token_address"] == analysis.address for p in positions):
             return
 
+        # ── FILTRO DE MERCADO: no comprar memecoins si SOL esta bajista ────
+        if config.ENABLE_MARKET_FILTER:
+            try:
+                import sol_market
+                m = await sol_market.get_sol_market(with_llm=False)
+                score = m.get("signal_score", 50)
+                if score < config.MARKET_FILTER_MIN_SCORE:
+                    await self.broadcast_log(
+                        "INFO",
+                        f"Mercado SOL bajista ({score}/100) - evito comprar {analysis.symbol} (las memecoins caen mas en rojo)"
+                    )
+                    return
+            except Exception:
+                pass
+
+        # ── ANTI-FOMO: no comprar el techo de un pump ─────────────────────
+        if analysis.price_change_1h and analysis.price_change_1h > config.MAX_PUMP_1H_PCT:
+            await self.broadcast_log(
+                "INFO",
+                f"Evito {analysis.symbol}: ya subio +{analysis.price_change_1h:.0f}% en 1h (riesgo de comprar el techo)"
+            )
+            return
+
         # ── SEGUNDO FILTRO: razonamiento LLM (Claude) ──────────────────────
         if llm_analyst.is_enabled():
             await self.broadcast_log("INFO", f"Consultando a la IA sobre {analysis.symbol}...")
