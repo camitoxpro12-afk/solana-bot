@@ -107,7 +107,7 @@ GROQ_BASE_URL = os.getenv("GROQ_BASE_URL", "https://api.groq.com/openai/v1")
 LLM_USE_GROQ = os.getenv("LLM_USE_GROQ", "true").lower() == "true"
 
 CEREBRAS_API_KEY = os.getenv("CEREBRAS_API_KEY", "")
-CEREBRAS_MODEL = os.getenv("CEREBRAS_MODEL", "llama-3.3-70b")
+CEREBRAS_MODEL = os.getenv("CEREBRAS_MODEL", "gpt-oss-120b")
 CEREBRAS_BASE_URL = os.getenv("CEREBRAS_BASE_URL", "https://api.cerebras.ai/v1")
 LLM_USE_CEREBRAS = os.getenv("LLM_USE_CEREBRAS", "true").lower() == "true"
 

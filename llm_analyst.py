@@ -377,8 +377,6 @@ async def sol_market_read(m: Dict[str, Any], log_fn=None) -> Optional[Dict[str, 
         def log_fn(level, msg):
             pass
 
-    client = _get_client()
-    model = config.LLM_MODEL
     user_msg = (
         f"Indicadores actuales del mercado de SOL:\n"
         f"- Precio: ${m.get('price_usd')}\n"
@@ -391,31 +389,11 @@ async def sol_market_read(m: Dict[str, Any], log_fn=None) -> Optional[Dict[str, 
         f"- Indice miedo/codicia: {m.get('fear_greed')} ({m.get('fear_greed_label')})\n\n"
         f"¿Es buen momento para mantener/acumular SOL? Da tu lectura."
     )
-    kwargs = dict(
-        model=model,
-        system=[{"type": "text", "text": SOL_MARKET_SYSTEM, "cache_control": {"type": "ephemeral"}}],
-        messages=[{"role": "user", "content": user_msg}],
-        output_config={"format": {"type": "json_schema", "schema": SOL_SCHEMA}},
-    )
-    if _supports_thinking(model) and config.ENABLE_LLM_THINKING:
-        kwargs["thinking"] = {"type": "adaptive"}
-        kwargs["max_tokens"] = 3000
-    else:
-        kwargs["max_tokens"] = 600
-
-    try:
-        resp = await client.messages.create(**kwargs)
-    except Exception as e:
-        log_fn("WARNING", f"LLM lectura SOL fallo: {e}")
-        return None
-
-    text = next((b.text for b in resp.content if b.type == "text"), None)
+    # Usa el pool de IAs (Claude si esta on, si no Gemini/Groq/Cerebras con rotacion)
+    text = await _ask_llm(SOL_MARKET_SYSTEM, user_msg, log_fn, max_tokens=1500)
     if not text:
         return None
-    try:
-        data = json.loads(text)
-    except json.JSONDecodeError:
-        data = _extract_verdict_json(text)
+    data = _extract_tagged_json(text, "verdict") or _extract_verdict_json(text)
     if not data:
         return None
     data["outlook"] = data.get("outlook") if data.get("outlook") in ("bullish", "neutral", "bearish") else "neutral"
@@ -610,7 +588,10 @@ async def _openai_ask(name: str, base_url: str, model: str, key_raw: str, label:
         if r.status_code == 200:
             choices = r.json().get("choices", [])
             if choices:
-                return ((choices[0].get("message", {}) or {}).get("content")) or None
+                msg = choices[0].get("message", {}) or {}
+                # Modelos razonadores (gpt-oss, glm...) ponen la salida en 'content';
+                # si viene vacia, usamos 'reasoning' como respaldo para no perder la respuesta.
+                return (msg.get("content") or msg.get("reasoning")) or None
         else:
             log_fn("WARNING", f"{label} error {r.status_code}")
     except Exception as e:
@@ -720,7 +701,7 @@ async def exit_review(pos: Dict, log_fn=None, market: Optional[Dict] = None) -> 
     if log_fn is None:
         def log_fn(level, msg):
             pass
-    if not (config.ENABLE_LLM_REVIEW and (_claude_available() or _gemini_available())):
+    if not (config.ENABLE_LLM_REVIEW and (_claude_available() or _any_free_available())):
         return None
     buy = pos.get("buy_price_usd") or 0
     cur = pos.get("current_price_usd") or buy
@@ -779,7 +760,7 @@ async def sol_expert_analysis(dossier: str, log_fn=None) -> Optional[Dict[str, A
     if log_fn is None:
         def log_fn(level, msg):
             pass
-    if not (config.ENABLE_LLM_REVIEW and (_claude_available() or _gemini_available())):
+    if not (config.ENABLE_LLM_REVIEW and (_claude_available() or _any_free_available())):
         return None
     text = await _ask_llm(SOL_EXPERT_SYSTEM, dossier, log_fn, max_tokens=4000)
     if not text:
