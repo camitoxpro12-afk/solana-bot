@@ -431,6 +431,18 @@ class BotEngine:
                 f"Trade cerrado: {pos['token_symbol']} | P&L: {emoji}{pnl:.4f} SOL ({emoji}{pnl_pct:.1f}%)"
             )
 
+            # ANTI-RUG: si la perdida es enorme (rug pull), a la LISTA NEGRA para
+            # no volver a comprar esa moneda jamas.
+            if pnl_pct <= -config.BLACKLIST_LOSS_PCT:
+                db.add_to_blacklist(
+                    pos["token_address"], pos.get("token_symbol", ""),
+                    f"Rug/perdida grande {pnl_pct:.0f}% ({reason})"
+                )
+                await self.broadcast_log(
+                    "WARNING",
+                    f"🚫 {pos['token_symbol']} a la LISTA NEGRA (perdida {pnl_pct:.0f}%) - no se volvera a comprar"
+                )
+
             # Trigger learning after each trade
             run_learning_cycle()
 
@@ -558,6 +570,9 @@ class BotEngine:
             protecciones.append("anti-honeypot")
         if config.ENABLE_DEV_ANALYSIS:
             protecciones.append("analisis dev/bundle")
+        protecciones.append(f"anti-rug (top10 max {config.MAX_TOP10_PCT:.0f}%)")
+        bl_count = len(db.get_blacklist())
+        protecciones.append(f"lista negra ({bl_count} vetadas)")
         if protecciones:
             await self.broadcast_log("INFO", "Protecciones activas: " + ", ".join(protecciones))
 
@@ -692,6 +707,12 @@ async def get_positions():
 @app.get("/api/logs")
 async def get_logs(limit: int = 100):
     return db.get_recent_logs(limit)
+
+
+@app.get("/api/blacklist")
+async def get_blacklist():
+    """Monedas vetadas por rug pull / perdida grande (no se vuelven a comprar)."""
+    return db.get_blacklist()
 
 
 @app.get("/api/learning")

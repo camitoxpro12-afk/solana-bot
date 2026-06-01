@@ -339,7 +339,7 @@ async def analyze_token(address: str, news_sentiment: float = 2.5, category: str
     # Determine verdict
     verdict, reason = _determine_verdict(
         total, float(liquidity_usd), age_minutes, mint_score, freeze_score, risks, category,
-        float(price_change_1h), float(price_change_24h)
+        float(price_change_1h), float(price_change_24h), top10_pct
     )
 
     return TokenAnalysis(
@@ -371,7 +371,7 @@ async def analyze_token(address: str, news_sentiment: float = 2.5, category: str
 def _determine_verdict(
     total_score: float, liquidity: float, age_minutes: float,
     mint_score: float, freeze_score: float, risks: list, category: str = "new",
-    price_change_1h: float = 0.0, price_change_24h: float = 0.0
+    price_change_1h: float = 0.0, price_change_24h: float = 0.0, top10_pct: float = 0.0
 ) -> tuple[str, str]:
     # Descalificadores de SEGURIDAD (siempre estrictos, sin importar la categoria/estrategia)
     if mint_score == 0.0:
@@ -380,6 +380,10 @@ def _determine_verdict(
         return "scam", "Freeze authority activo - pueden congelar tu wallet"
     if liquidity < config.MIN_LIQUIDITY_USD:
         return "skip", f"Liquidez insuficiente: ${liquidity:,.0f}"
+    # ANTI-RUG: si el top 10 de wallets posee demasiado supply, pueden tirar el precio
+    # a cero de golpe (rug pull). Es la bandera roja #1 segun los datos reales.
+    if top10_pct > config.MAX_TOP10_PCT:
+        return "scam", f"Holders muy concentrados: top 10 posee {top10_pct:.0f}% (max {config.MAX_TOP10_PCT:.0f}%) - riesgo de rug pull"
 
     # Filtros de antiguedad SOLO para tokens nuevos (las trending/top son establecidas)
     if category == "new":

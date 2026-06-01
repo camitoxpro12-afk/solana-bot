@@ -93,6 +93,13 @@ def init_db():
                 key TEXT PRIMARY KEY,
                 value TEXT
             );
+
+            CREATE TABLE IF NOT EXISTS blacklist (
+                address TEXT PRIMARY KEY,
+                symbol TEXT,
+                reason TEXT,
+                added_at TEXT DEFAULT (datetime('now'))
+            );
         """)
         # Seed default learning weights if not present
         for factor, weight in DEFAULT_WEIGHTS.items():
@@ -391,6 +398,34 @@ def get_recent_trades_for_learning(n: int = 20) -> List[Dict]:
     with get_conn() as conn:
         rows = conn.execute(
             "SELECT pnl_pct, scores FROM trades ORDER BY sell_time DESC LIMIT ?", (n,)
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+# ── Lista negra (anti-rug) ─────────────────────────────────────────────────────
+
+def add_to_blacklist(address: str, symbol: str = "", reason: str = ""):
+    """Marca una moneda para NO volver a comprarla jamas (p.ej. tras un rug pull)."""
+    with get_conn() as conn:
+        conn.execute(
+            "INSERT OR IGNORE INTO blacklist (address, symbol, reason) VALUES (?, ?, ?)",
+            (address, symbol, reason)
+        )
+        conn.commit()
+
+
+def is_blacklisted(address: str) -> bool:
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT 1 FROM blacklist WHERE address = ?", (address,)
+        ).fetchone()
+    return row is not None
+
+
+def get_blacklist(limit: int = 100) -> List[Dict]:
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT * FROM blacklist ORDER BY added_at DESC LIMIT ?", (limit,)
         ).fetchall()
     return [dict(r) for r in rows]
 

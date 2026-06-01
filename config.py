@@ -10,7 +10,7 @@ PRIVATE_KEY = os.getenv("PRIVATE_KEY", "")
 RPC_URL = os.getenv("RPC_URL", "https://api.mainnet-beta.solana.com")
 
 # Trading parameters
-MAX_TRADE_PCT = float(os.getenv("MAX_TRADE_PCT", "0.18"))
+MAX_TRADE_PCT = float(os.getenv("MAX_TRADE_PCT", "0.12"))
 MIN_TRADE_SOL = float(os.getenv("MIN_TRADE_SOL", "0.02"))
 TAKE_PROFIT_PCT = float(os.getenv("TAKE_PROFIT_PCT", "1.5"))
 STOP_LOSS_PCT = float(os.getenv("STOP_LOSS_PCT", "0.35"))
@@ -44,7 +44,13 @@ DIP_MAX_1H = float(os.getenv("DIP_MAX_1H", "-3"))              # y estar bajando
 ENABLE_AI_EXIT = os.getenv("ENABLE_AI_EXIT", "true").lower() == "true"
 AI_EXIT_INTERVAL = int(os.getenv("AI_EXIT_INTERVAL", "180"))      # revisa cada posicion cada X seg (3 min)
 AI_EXIT_MIN_CONFIDENCE = float(os.getenv("AI_EXIT_MIN_CONFIDENCE", "60"))  # solo vende si la IA esta segura
-MAX_TOP10_PCT = float(os.getenv("MAX_TOP10_PCT", "45"))
+# Concentracion de holders: si el top 10 de wallets posee mas de este % -> RECHAZO DURO.
+# Esas monedas son las que hacen RUG PULL (un solo duenyo tira todo el supply de golpe).
+# Bajado a 40 tras detectar que TODOS los rugs tenian holders muy concentrados.
+MAX_TOP10_PCT = float(os.getenv("MAX_TOP10_PCT", "40"))
+# Si una posicion se cierra perdiendo mas de este % (rug pull), la moneda va a la LISTA NEGRA
+# y NO se vuelve a comprar jamas (evita re-comprar una moneda que ya te rugeo).
+BLACKLIST_LOSS_PCT = float(os.getenv("BLACKLIST_LOSS_PCT", "50"))
 MIN_TOKEN_AGE_MINUTES = int(os.getenv("MIN_TOKEN_AGE_MINUTES", "20"))
 MAX_TOKEN_AGE_HOURS = int(os.getenv("MAX_TOKEN_AGE_HOURS", "48"))
 

@@ -9,7 +9,7 @@ from typing import List, Dict, Optional, Set, Callable, Awaitable
 import httpx
 
 import config
-from database import was_token_seen, mark_token_seen, add_log
+from database import was_token_seen, mark_token_seen, add_log, is_blacklisted
 from analyzer import analyze_token
 from news import get_token_sentiment_boost
 
@@ -175,6 +175,10 @@ async def scan_new_tokens(
     for token in candidates:
         addr = token["address"]
         category = token.get("category", "new")
+
+        # LISTA NEGRA: monedas que ya hicieron rug pull. NUNCA se vuelven a comprar.
+        if is_blacklisted(addr):
+            continue
 
         # Nuevas: analizar una sola vez. Trending/top: re-evaluar con cooldown.
         if category == "new":
