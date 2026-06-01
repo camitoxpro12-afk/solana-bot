@@ -220,6 +220,8 @@ async def swap_sol_to_usdc(sol_amount: float) -> Tuple[bool, float, str]:
     """Convierte SOL -> USDC (proteccion en mercado bajista). (success, usdc_received, sig)"""
     if not config.ENABLE_TRADING:
         price = await get_sol_price_usd()
+        if price <= 0:
+            price = config.PAPER_SOL_PRICE_USD
         add_log("INFO", f"[PAPER] Simulando SOL->USDC: {sol_amount:.4f} SOL -> ${sol_amount*price:.2f}")
         return True, sol_amount * price, "paper_swap"
     ok, usdc_received, _price, sig = await buy_token(config.USDC_MINT, sol_amount)
@@ -230,6 +232,8 @@ async def swap_usdc_to_sol(usdc_amount: float) -> Tuple[bool, float, str]:
     """Convierte USDC -> SOL (recompra en mercado alcista). (success, sol_received, sig)"""
     if not config.ENABLE_TRADING:
         price = await get_sol_price_usd()
+        if price <= 0:
+            price = config.PAPER_SOL_PRICE_USD
         sol = (usdc_amount / price) if price > 0 else 0.0
         add_log("INFO", f"[PAPER] Simulando USDC->SOL: ${usdc_amount:.2f} -> {sol:.4f} SOL")
         return True, sol, "paper_swap"
