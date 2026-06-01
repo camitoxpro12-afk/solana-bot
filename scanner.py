@@ -26,6 +26,65 @@ _SKIP_MINTS = {
 }
 
 
+def _num(value, default: float = 0.0) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _gecko_metrics(attrs: Dict) -> Dict:
+    price_change = attrs.get("price_change_percentage") or {}
+    volume = attrs.get("volume_usd") or {}
+    txns = attrs.get("transactions") or {}
+    h1 = txns.get("h1") or {}
+    h24 = txns.get("h24") or {}
+    return {
+        "liquidity_usd": _num(attrs.get("reserve_in_usd")),
+        "volume_1h": _num(volume.get("h1")),
+        "volume_24h": _num(volume.get("h24")),
+        "change_1h": _num(price_change.get("h1")),
+        "change_6h": _num(price_change.get("h6")),
+        "change_24h": _num(price_change.get("h24")),
+        "txns_1h": int(_num(h1.get("buys")) + _num(h1.get("sells"))),
+        "txns_24h": int(_num(h24.get("buys")) + _num(h24.get("sells"))),
+    }
+
+
+def _passes_market_prefilter(token: Dict) -> tuple[bool, str]:
+    """Filtro barato antes de RugCheck/IA: solo aplica cuando ya tenemos metricas."""
+    if token.get("category") == "favorite":
+        return True, ""
+    m = token.get("metrics") or {}
+    if not m:
+        return True, ""
+    if m.get("liquidity_usd", 0) < config.SCAN_MIN_LIQUIDITY_USD:
+        return False, f"liquidez ${m.get('liquidity_usd', 0):,.0f}"
+    if m.get("volume_1h", 0) < config.SCAN_MIN_VOLUME_1H_USD:
+        return False, f"volumen 1h ${m.get('volume_1h', 0):,.0f}"
+    if m.get("txns_1h", 0) < config.SCAN_MIN_TXNS_1H:
+        return False, f"pocas transacciones 1h ({m.get('txns_1h', 0)})"
+    if m.get("change_24h", 0) < config.SCAN_MIN_24H_CHANGE_PCT:
+        return False, f"24h {m.get('change_24h', 0):+.0f}%"
+    if m.get("change_6h", 0) < config.SCAN_MIN_6H_CHANGE_PCT:
+        return False, f"6h {m.get('change_6h', 0):+.0f}%"
+    return True, ""
+
+
+def _candidate_quality(token: Dict) -> float:
+    """Ordena primero las monedas con mercado real y crecimiento sostenido."""
+    m = token.get("metrics") or {}
+    if not m:
+        return 0.0
+    return (
+        min(m.get("liquidity_usd", 0), 500_000) / 10_000
+        + min(m.get("volume_1h", 0), 500_000) / 20_000
+        + min(m.get("txns_1h", 0), 2000) / 40
+        + max(-50, min(m.get("change_24h", 0), 300)) / 5
+        + max(-50, min(m.get("change_6h", 0), 150)) / 6
+    )
+
+
 async def _fetch_pumpfun_new() -> List[Dict]:
     """Latest tokens from pump.fun sorted by creation time"""
     try:
@@ -91,14 +150,16 @@ async def _fetch_geckoterminal(path: str, category: str) -> List[Dict]:
                 data = r.json().get("data", []) or []
                 out = []
                 for pool in data[:30]:
+                    attrs = pool.get("attributes", {}) or {}
                     rel = (pool.get("relationships", {}) or {}).get("base_token", {}).get("data", {}) or {}
                     tid = (rel.get("id") or "").replace("solana_", "")
                     if not tid or tid in _SKIP_MINTS:
                         continue
-                    name = (pool.get("attributes", {}).get("name") or "").split("/")[0].strip()
+                    name = (attrs.get("name") or "").split("/")[0].strip()
                     out.append({
                         "address": tid, "name": name, "symbol": name,
                         "source": "geckoterminal", "category": category, "created_at_ms": 0,
+                        "metrics": _gecko_metrics(attrs),
                     })
                 return out
     except Exception as e:
@@ -152,6 +213,7 @@ async def scan_new_tokens(
         fetchers.append(_fetch_trending())
     if config.SCAN_TOP:
         fetchers.append(_fetch_top())
+    if config.SCAN_PUMPFUN_TOP:
         fetchers.append(_fetch_pumpfun_top())
     if config.SCAN_NEW:
         fetchers.append(_fetch_pumpfun_new())
@@ -183,6 +245,18 @@ async def scan_new_tokens(
                 "symbol": fav.get("symbol", ""),
                 "source": "favorito", "category": "favorite", "created_at_ms": 0,
             })
+
+    kept = []
+    prefiltered = 0
+    for token in candidates:
+        ok, reason = _passes_market_prefilter(token)
+        if ok:
+            kept.append(token)
+        else:
+            prefiltered += 1
+    if prefiltered:
+        add_log("INFO", f"Prefiltro calidad: {prefiltered} tokens sin mercado fuerte omitidos antes del analisis")
+    candidates = sorted(kept, key=_candidate_quality, reverse=True)
 
     new_count = 0
     for token in candidates:

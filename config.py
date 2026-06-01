@@ -18,7 +18,7 @@ MAX_POSITIONS = int(os.getenv("MAX_POSITIONS", "3"))
 SLIPPAGE_BPS = int(os.getenv("SLIPPAGE_BPS", "500"))
 
 # Token filters
-MIN_LIQUIDITY_USD = float(os.getenv("MIN_LIQUIDITY_USD", "4000"))
+MIN_LIQUIDITY_USD = float(os.getenv("MIN_LIQUIDITY_USD", "10000"))
 MIN_SCORE = float(os.getenv("MIN_SCORE", "58"))
 MIN_SCORE_TRENDING = float(os.getenv("MIN_SCORE_TRENDING", "50"))  # umbral mas flexible para trending/top
 
@@ -69,7 +69,15 @@ MAX_TOKEN_AGE_HOURS = int(os.getenv("MAX_TOKEN_AGE_HOURS", "48"))
 SCAN_NEW = os.getenv("SCAN_NEW", "false").lower() == "true"          # recien creadas (pump.fun) - mucho spam
 SCAN_TRENDING = os.getenv("SCAN_TRENDING", "true").lower() == "true"  # en tendencia (de moda)
 SCAN_TOP = os.getenv("SCAN_TOP", "true").lower() == "true"            # top por volumen 24h
+SCAN_PUMPFUN_TOP = os.getenv("SCAN_PUMPFUN_TOP", "false").lower() == "true"  # pump.fun top aun trae mucho spam
 RESCAN_TRENDING_MINUTES = int(os.getenv("RESCAN_TRENDING_MINUTES", "7"))  # re-evaluar trending cada X min
+
+# Prefiltro rapido del escaner: evita gastar RugCheck/IA en tokens sin mercado real.
+SCAN_MIN_LIQUIDITY_USD = float(os.getenv("SCAN_MIN_LIQUIDITY_USD", "10000"))
+SCAN_MIN_VOLUME_1H_USD = float(os.getenv("SCAN_MIN_VOLUME_1H_USD", "5000"))
+SCAN_MIN_TXNS_1H = int(os.getenv("SCAN_MIN_TXNS_1H", "25"))
+SCAN_MIN_24H_CHANGE_PCT = float(os.getenv("SCAN_MIN_24H_CHANGE_PCT", str(DIP_MIN_24H_RISE)))
+SCAN_MIN_6H_CHANGE_PCT = float(os.getenv("SCAN_MIN_6H_CHANGE_PCT", "0"))
 
 # APIs
 CRYPTOPANIC_API_KEY = os.getenv("CRYPTOPANIC_API_KEY", "")
