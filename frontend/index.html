@@ -274,6 +274,9 @@ const FACTOR_NAMES = {
   news_sentiment: 'Noticias', social_score: 'Social'
 };
 let ws, solPriceEur = 0, tokensShown = [];
+let lastLogId = 0, pollingLogs = false;
+const seenLogIds = new Set();
+const recentLogSigs = new Map();
 const REASON_LABELS = {
   take_profit: 'Take-profit', stop_loss: 'Stop-loss', trailing_stop: 'Trailing stop',
   partial_tp: 'TP parcial', manual: 'Manual', profit: 'Ganancia', loss: 'Perdida', sol_swing: 'Swing SOL', ai_exit: 'Salida IA 🧠'
@@ -366,13 +369,41 @@ async function toggleMode() {
 }
 
 function addLog(d) {
+  if (!d) return;
+  if (d.id) {
+    if (seenLogIds.has(d.id)) return;
+    seenLogIds.add(d.id);
+    lastLogId = Math.max(lastLogId, Number(d.id) || 0);
+  } else {
+    const sig = `${d.level||'INFO'}|${d.message||''}`;
+    recentLogSigs.set(sig, Date.now());
+  }
+  const sig = `${d.level||'INFO'}|${d.message||''}`;
+  const recent = recentLogSigs.get(sig);
+  if (d.id && recent && Date.now() - recent < 5000) return;
   const c = document.getElementById('logs');
   const line = document.createElement('div');
   line.className = 'log-line log-' + (d.level||'INFO');
   line.innerHTML = `<span class="log-time">${d.ts||d.timestamp||''}</span><span class="log-msg">${escapeHtml(d.message||'')}</span>`;
   c.appendChild(line);
   while (c.children.length > 200) c.removeChild(c.firstChild);
+  while (seenLogIds.size > 300) seenLogIds.delete(seenLogIds.values().next().value);
+  const cutoff = Date.now() - 10000;
+  for (const [k, t] of recentLogSigs) if (t < cutoff) recentLogSigs.delete(k);
   c.scrollTop = c.scrollHeight;
+}
+
+async function pollLogs() {
+  if (pollingLogs) return;
+  pollingLogs = true;
+  try {
+    const url = lastLogId ? `/api/logs?since_id=${lastLogId}&limit=100` : '/api/logs?limit=50';
+    const logs = await (await fetch(url)).json();
+    (logs || []).forEach(addLog);
+  } catch(e) {
+  } finally {
+    pollingLogs = false;
+  }
 }
 
 function scoreColor(score) {
@@ -820,6 +851,7 @@ function coinAvatar(url, symbol, size) {
 
 connect();
 loadSolMarket();
+setInterval(pollLogs, 2000);
 setInterval(async()=>{
   try {
     updateStatus(await (await fetch('/api/status')).json());

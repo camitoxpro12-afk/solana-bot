@@ -803,7 +803,9 @@ async def get_positions():
 
 
 @app.get("/api/logs")
-async def get_logs(limit: int = 100):
+async def get_logs(limit: int = 100, since_id: int = 0):
+    if since_id > 0:
+        return db.get_logs_since(since_id, limit)
     return db.get_recent_logs(limit)
 
 

@@ -137,6 +137,9 @@ def add_log(level: str, message: str):
             "INSERT INTO bot_logs (level, message) VALUES (?, ?)",
             (level, message)
         )
+        conn.execute(
+            "DELETE FROM bot_logs WHERE id NOT IN (SELECT id FROM bot_logs ORDER BY id DESC LIMIT 2000)"
+        )
         conn.commit()
 
 
@@ -146,6 +149,15 @@ def get_recent_logs(limit: int = 100) -> List[Dict]:
             "SELECT * FROM bot_logs ORDER BY id DESC LIMIT ?", (limit,)
         ).fetchall()
     return [dict(r) for r in reversed(rows)]
+
+
+def get_logs_since(since_id: int, limit: int = 100) -> List[Dict]:
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT * FROM bot_logs WHERE id > ? ORDER BY id ASC LIMIT ?",
+            (since_id, limit)
+        ).fetchall()
+    return [dict(r) for r in rows]
 
 
 # ── Positions ─────────────────────────────────────────────────────────────────
