@@ -40,6 +40,7 @@ class BotEngine:
         self.sol_price_eur: float = 0.0
         self.price_cache_time: float = 0.0
         self._position_monitor_task: Optional[asyncio.Task] = None
+        self._ai_exit_reviews: dict[int, int] = {}
 
     async def broadcast(self, msg_type: str, data: dict):
         """Send message to all connected WebSocket clients"""
@@ -422,6 +423,7 @@ class BotEngine:
 
         result = db.close_position(pos["id"], sell_price, reason)
         if result:
+            self._ai_exit_reviews.pop(int(pos["id"]), None)
             pnl = result.get("pnl_sol", 0)
             pnl_pct = result.get("pnl_pct", 0)
             emoji = "+" if pnl > 0 else ""
@@ -585,6 +587,8 @@ class BotEngine:
             # 2) MANTENER + AJUSTAR la regla (objetivo/stop dinamicos)
             if config.ENABLE_AI_DYNAMIC_LEVELS:
                 await self._apply_ai_levels(pos, review, cur)
+            else:
+                await self._log_ai_hold_summary(pos, review, cur)
 
     async def _apply_ai_levels(self, pos: dict, review: dict, cur: float):
         """Aplica el objetivo/stop que decide la IA. Las reglas rapidas los ejecutaran al instante."""
@@ -616,6 +620,7 @@ class BotEngine:
             abs(new_stop - old_stop) > old_stop * 0.01
         )
         if not changed:
+            await self._log_ai_hold_summary(pos, review, cur)
             return
         db.update_position_levels(pos["id"], new_target, new_stop)
         tgt_p = (new_target - buy) / buy * 100
@@ -625,6 +630,28 @@ class BotEngine:
             f"🧠 IA ajusta plan de {pos['token_symbol']}: objetivo {tgt_p:+.0f}% / stop {stop_p:+.0f}% | {review.get('reason','')}"
         )
         await self.broadcast("balance_update", await self.get_status())
+
+    async def _log_ai_hold_summary(self, pos: dict, review: dict, cur: float):
+        """Muestra que la IA sigue vigilando aunque mantenga el mismo plan."""
+        if config.AI_EXIT_SUMMARY_EVERY <= 0:
+            return
+        pid = int(pos["id"])
+        count = self._ai_exit_reviews.get(pid, 0) + 1
+        self._ai_exit_reviews[pid] = count
+        if count % config.AI_EXIT_SUMMARY_EVERY != 0:
+            return
+        buy = pos.get("buy_price_usd") or 0
+        pnl = ((cur - buy) / buy * 100) if buy > 0 else 0
+        tgt = pos.get("target_price_usd") or 0
+        stp = pos.get("stop_price_usd") or 0
+        tgt_p = ((tgt - buy) / buy * 100) if buy > 0 and tgt > 0 else 0
+        stp_p = ((stp - buy) / buy * 100) if buy > 0 and stp > 0 else 0
+        action = "mantiene" if review.get("action") != "sell" else "vigila salida"
+        await self.broadcast_log(
+            "INFO",
+            f"🧠 IA {action} {pos['token_symbol']}: P&L {pnl:+.1f}% | "
+            f"plan objetivo {tgt_p:+.0f}% / stop {stp_p:+.0f}% | {review.get('reason','')}"
+        )
 
     # ── Start / Stop ──────────────────────────────────────────────────────────
 
