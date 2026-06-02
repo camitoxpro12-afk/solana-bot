@@ -39,6 +39,9 @@ def _gecko_metrics(attrs: Dict) -> Dict:
     txns = attrs.get("transactions") or {}
     h1 = txns.get("h1") or {}
     h24 = txns.get("h24") or {}
+    buys_1h = _num(h1.get("buys"))
+    sells_1h = _num(h1.get("sells"))
+    txns_1h = int(buys_1h + sells_1h)
     return {
         "liquidity_usd": _num(attrs.get("reserve_in_usd")),
         "volume_1h": _num(volume.get("h1")),
@@ -46,7 +49,10 @@ def _gecko_metrics(attrs: Dict) -> Dict:
         "change_1h": _num(price_change.get("h1")),
         "change_6h": _num(price_change.get("h6")),
         "change_24h": _num(price_change.get("h24")),
-        "txns_1h": int(_num(h1.get("buys")) + _num(h1.get("sells"))),
+        "buys_1h": int(buys_1h),
+        "sells_1h": int(sells_1h),
+        "txns_1h": txns_1h,
+        "buy_ratio_1h": (buys_1h / txns_1h) if txns_1h > 0 else 0.0,
         "txns_24h": int(_num(h24.get("buys")) + _num(h24.get("sells"))),
     }
 
@@ -68,6 +74,10 @@ def _passes_market_prefilter(token: Dict) -> tuple[bool, str]:
         return False, f"24h {m.get('change_24h', 0):+.0f}%"
     if m.get("change_6h", 0) < config.SCAN_MIN_6H_CHANGE_PCT:
         return False, f"6h {m.get('change_6h', 0):+.0f}%"
+    if m.get("change_1h", 0) > config.SCAN_MAX_1H_CHANGE_PCT:
+        return False, f"1h +{m.get('change_1h', 0):.0f}% (pump demasiado vertical)"
+    if m.get("buy_ratio_1h", 0) < config.SCAN_MIN_BUY_RATIO_1H:
+        return False, f"presion compradora baja ({m.get('buy_ratio_1h', 0)*100:.0f}%)"
     return True, ""
 
 

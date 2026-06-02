@@ -10,10 +10,10 @@ PRIVATE_KEY = os.getenv("PRIVATE_KEY", "")
 RPC_URL = os.getenv("RPC_URL", "https://api.mainnet-beta.solana.com")
 
 # Trading parameters
-MAX_TRADE_PCT = float(os.getenv("MAX_TRADE_PCT", "0.12"))
+MAX_TRADE_PCT = float(os.getenv("MAX_TRADE_PCT", "0.10"))
 MIN_TRADE_SOL = float(os.getenv("MIN_TRADE_SOL", "0.02"))
-TAKE_PROFIT_PCT = float(os.getenv("TAKE_PROFIT_PCT", "1.5"))
-STOP_LOSS_PCT = float(os.getenv("STOP_LOSS_PCT", "0.35"))
+TAKE_PROFIT_PCT = float(os.getenv("TAKE_PROFIT_PCT", "0.25"))
+STOP_LOSS_PCT = float(os.getenv("STOP_LOSS_PCT", "0.12"))
 MAX_POSITIONS = int(os.getenv("MAX_POSITIONS", "3"))
 SLIPPAGE_BPS = int(os.getenv("SLIPPAGE_BPS", "500"))
 
@@ -37,6 +37,17 @@ MAX_PUMP_1H_PCT = float(os.getenv("MAX_PUMP_1H_PCT", "60"))
 STRATEGY = os.getenv("STRATEGY", "dip")
 DIP_MIN_24H_RISE = float(os.getenv("DIP_MIN_24H_RISE", "15"))  # la moneda debe haber subido >= X% en 24h
 DIP_MAX_1H = float(os.getenv("DIP_MAX_1H", "-3"))              # y estar bajando <= X% en 1h ahora (el retroceso)
+
+# Confirmacion de rebote: despues de detectar el dip, espera unos segundos y solo
+# compra si el precio deja de caer y aparece presion compradora. Es la parte que
+# imita el "mirar rapido, esperar la bajada y entrar cuando rebota".
+ENABLE_ENTRY_REBOUND_CONFIRMATION = os.getenv("ENABLE_ENTRY_REBOUND_CONFIRMATION", "true").lower() == "true"
+ENTRY_CONFIRM_SAMPLES = int(os.getenv("ENTRY_CONFIRM_SAMPLES", "3"))
+ENTRY_CONFIRM_INTERVAL_SECONDS = float(os.getenv("ENTRY_CONFIRM_INTERVAL_SECONDS", "4"))
+ENTRY_CONFIRM_MIN_BOUNCE_PCT = float(os.getenv("ENTRY_CONFIRM_MIN_BOUNCE_PCT", "0.6"))
+ENTRY_CONFIRM_MAX_EXTRA_DROP_PCT = float(os.getenv("ENTRY_CONFIRM_MAX_EXTRA_DROP_PCT", "3"))
+ENTRY_CONFIRM_MIN_BUY_RATIO = float(os.getenv("ENTRY_CONFIRM_MIN_BUY_RATIO", "0.48"))
+ENTRY_CONFIRM_MIN_5M_CHANGE_PCT = float(os.getenv("ENTRY_CONFIRM_MIN_5M_CHANGE_PCT", "-2"))
 
 # === SALIDA CON IA (hibrido: la IA es el cerebro, las reglas el gatillo rapido) ===
 # La IA revisa cada posicion cada X seg: mira el precio, momentum, graficas, y decide.
@@ -85,10 +96,14 @@ SCAN_MIN_VOLUME_1H_USD = float(os.getenv("SCAN_MIN_VOLUME_1H_USD", "5000"))
 SCAN_MIN_TXNS_1H = int(os.getenv("SCAN_MIN_TXNS_1H", "25"))
 SCAN_MIN_24H_CHANGE_PCT = float(os.getenv("SCAN_MIN_24H_CHANGE_PCT", str(DIP_MIN_24H_RISE)))
 SCAN_MIN_6H_CHANGE_PCT = float(os.getenv("SCAN_MIN_6H_CHANGE_PCT", "0"))
+SCAN_MAX_1H_CHANGE_PCT = float(os.getenv("SCAN_MAX_1H_CHANGE_PCT", "80"))
+SCAN_MIN_BUY_RATIO_1H = float(os.getenv("SCAN_MIN_BUY_RATIO_1H", "0.45"))
 
 # APIs
 CRYPTOPANIC_API_KEY = os.getenv("CRYPTOPANIC_API_KEY", "")
 BIRDEYE_API_KEY = os.getenv("BIRDEYE_API_KEY", "")
+BIRDEYE_BASE_URL = os.getenv("BIRDEYE_BASE_URL", "https://public-api.birdeye.so")
+ENABLE_BIRDEYE_ENTRY_DATA = os.getenv("ENABLE_BIRDEYE_ENTRY_DATA", "true").lower() == "true"
 
 # Capa de razonamiento LLM (Claude)
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
@@ -141,12 +156,20 @@ LLM_PROVIDER_COOLDOWN_SECONDS = int(os.getenv("LLM_PROVIDER_COOLDOWN_SECONDS", "
 
 # Intervals (seconds)
 SCAN_INTERVAL = int(os.getenv("SCAN_INTERVAL", "30"))
-PRICE_CHECK_INTERVAL = int(os.getenv("PRICE_CHECK_INTERVAL", "8"))
+PRICE_CHECK_INTERVAL = int(os.getenv("PRICE_CHECK_INTERVAL", "5"))
 NEWS_INTERVAL = int(os.getenv("NEWS_INTERVAL", "120"))
 PRICE_CACHE_SECONDS = 300  # Cache SOL/EUR price 5 min
 
 # Risk management
 MAX_DAILY_LOSS_PCT = float(os.getenv("MAX_DAILY_LOSS_PCT", "0.25"))
+MAX_DAILY_TRADES = int(os.getenv("MAX_DAILY_TRADES", "24"))
+GLOBAL_TRADE_COOLDOWN_SECONDS = int(os.getenv("GLOBAL_TRADE_COOLDOWN_SECONDS", "120"))
+MAX_CONSECUTIVE_LOSSES = int(os.getenv("MAX_CONSECUTIVE_LOSSES", "3"))
+LOSS_PAUSE_MINUTES = float(os.getenv("LOSS_PAUSE_MINUTES", "45"))
+TOKEN_RECENT_HOURS = float(os.getenv("TOKEN_RECENT_HOURS", "24"))
+TOKEN_MAX_RECENT_LOSSES = int(os.getenv("TOKEN_MAX_RECENT_LOSSES", "2"))
+TOKEN_MIN_RECENT_WIN_RATE = float(os.getenv("TOKEN_MIN_RECENT_WIN_RATE", "35"))
+TOKEN_MIN_RECENT_AVG_PNL_PCT = float(os.getenv("TOKEN_MIN_RECENT_AVG_PNL_PCT", "-0.2"))
 ENABLE_TRADING = os.getenv("ENABLE_TRADING", "true").lower() == "true"
 # Balance virtual inicial en modo simulacion (paper). En modo real usa el de la wallet.
 PAPER_START_EUR = float(os.getenv("PAPER_START_EUR", "50"))
@@ -155,13 +178,16 @@ PAPER_SOL_PRICE_USD = float(os.getenv("PAPER_SOL_PRICE_USD", "80"))
 # === ESTRATEGIA DE SALIDA AVANZADA ===
 # Take-profit parcial: vende una fraccion al llegar a Nx para recuperar capital
 ENABLE_PARTIAL_TP = os.getenv("ENABLE_PARTIAL_TP", "true").lower() == "true"
-PARTIAL_TP_TRIGGER_PCT = float(os.getenv("PARTIAL_TP_TRIGGER_PCT", "1.0"))   # +100% = 2x
-PARTIAL_TP_SELL_FRACTION = float(os.getenv("PARTIAL_TP_SELL_FRACTION", "0.5"))  # vende la mitad
+PARTIAL_TP_TRIGGER_PCT = float(os.getenv("PARTIAL_TP_TRIGGER_PCT", "0.08"))   # +8%: captura rebotes utiles
+PARTIAL_TP_SELL_FRACTION = float(os.getenv("PARTIAL_TP_SELL_FRACTION", "0.35"))  # vende una parte y deja correr
+ENABLE_FAST_BREAKEVEN = os.getenv("ENABLE_FAST_BREAKEVEN", "true").lower() == "true"
+BREAKEVEN_AFTER_PCT = float(os.getenv("BREAKEVEN_AFTER_PCT", "4"))
+BREAKEVEN_STOP_PCT = float(os.getenv("BREAKEVEN_STOP_PCT", "0.5"))
 
 # Trailing stop: el stop sube con el precio para capturar pumps grandes.
 # Si esta activo, sustituye al take-profit fijo (deja correr al ganador).
 ENABLE_TRAILING_STOP = os.getenv("ENABLE_TRAILING_STOP", "true").lower() == "true"
-TRAILING_STOP_PCT = float(os.getenv("TRAILING_STOP_PCT", "0.30"))  # cae 30% desde el pico -> vende
+TRAILING_STOP_PCT = float(os.getenv("TRAILING_STOP_PCT", "0.12"))  # cae 12% desde el pico -> protege rebotes
 
 # Anti-honeypot: simula compra+venta via Jupiter antes de comprar de verdad
 ENABLE_HONEYPOT_CHECK = os.getenv("ENABLE_HONEYPOT_CHECK", "true").lower() == "true"
@@ -187,10 +213,16 @@ SOL_SWING_INTERVAL = int(os.getenv("SOL_SWING_INTERVAL", "300"))         # revis
 # Aprendizaje: ignora micro-resultados porque no son senal real (slippage/ruido).
 LEARNING_MIN_TRADES = int(os.getenv("LEARNING_MIN_TRADES", "8"))
 LEARNING_MIN_ABS_PNL_PCT = float(os.getenv("LEARNING_MIN_ABS_PNL_PCT", "1.0"))
+LEARNING_WINDOW_TRADES = int(os.getenv("LEARNING_WINDOW_TRADES", "100"))
+LEARNING_RATE = float(os.getenv("LEARNING_RATE", "0.05"))
 
 # Jupiter API (lite-api = gratis, sin key). La vieja quote-api.jup.ag fue retirada.
 JUPITER_QUOTE_URL = os.getenv("JUPITER_QUOTE_URL", "https://lite-api.jup.ag/swap/v1/quote")
 JUPITER_SWAP_URL = os.getenv("JUPITER_SWAP_URL", "https://lite-api.jup.ag/swap/v1/swap")
+JUPITER_DYNAMIC_SLIPPAGE = os.getenv("JUPITER_DYNAMIC_SLIPPAGE", "true").lower() == "true"
+JUPITER_PRIORITY_LEVEL = os.getenv("JUPITER_PRIORITY_LEVEL", "veryHigh")
+JUPITER_MAX_PRIORITY_LAMPORTS = int(os.getenv("JUPITER_MAX_PRIORITY_LAMPORTS", "1000000"))
+MAX_PRICE_IMPACT_PCT = float(os.getenv("MAX_PRICE_IMPACT_PCT", "5"))
 
 # Analysis API base URLs
 DEXSCREENER_URL = "https://api.dexscreener.com"

@@ -56,17 +56,25 @@ assert dist == 0.0, f"top10=50% debe dar 0 pts, dio {dist}"
 print(f"[OK] Distribucion holders: top10={top10}% -> {dist} pts")
 
 # 4. Veredictos
-verdict, reason = _determine_verdict(75, 10000, 60, 10, 10, [])
-assert verdict == "buy", f"score 75 deberia ser buy, dio {verdict}"
-verdict2, _ = _determine_verdict(75, 10000, 60, 0, 10, [])
+verdict, reason = _determine_verdict(
+    75, 10000, 60, 10, 10, [],
+    category="top", price_change_1h=-4, price_change_24h=25, top10_pct=20
+)
+assert verdict == "buy", f"dip valido deberia ser buy, dio {verdict}: {reason}"
+verdict_wait, _ = _determine_verdict(
+    75, 10000, 60, 10, 10, [],
+    category="top", price_change_1h=2, price_change_24h=25, top10_pct=20
+)
+assert verdict_wait == "skip", "en modo dip debe esperar retroceso"
+verdict2, _ = _determine_verdict(75, 10000, 60, 0, 10, [], price_change_1h=-4, price_change_24h=25)
 assert verdict2 == "scam", "mint activo deberia ser scam"
-verdict3, _ = _determine_verdict(75, 100, 60, 10, 10, [])
+verdict3, _ = _determine_verdict(75, 100, 60, 10, 10, [], price_change_1h=-4, price_change_24h=25)
 assert verdict3 == "skip", "liquidez baja deberia ser skip"
-verdict4, _ = _determine_verdict(40, 10000, 60, 10, 10, [])
-assert verdict4 == "skip", "score bajo deberia ser skip"
-verdict5, _ = _determine_verdict(75, 10000, 60, 10, 10, ["honeypot detected"])
+verdict4, _ = _determine_verdict(39, 10000, 60, 10, 10, [], price_change_1h=-4, price_change_24h=25)
+assert verdict4 == "skip", "calidad demasiado baja deberia ser skip"
+verdict5, _ = _determine_verdict(75, 10000, 60, 10, 10, ["honeypot detected"], price_change_1h=-4, price_change_24h=25)
 assert verdict5 == "scam", "honeypot deberia ser scam"
-print("[OK] Veredictos: buy/scam/skip correctos en 5 casos")
+print("[OK] Veredictos dip: buy/scam/skip correctos")
 
 # 5. TokenScores suma total
 ts = TokenScores(rugcheck=20, mint_authority=10, freeze_authority=10,

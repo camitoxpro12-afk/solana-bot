@@ -74,23 +74,51 @@ async def get_jupiter_quote(
     return None
 
 
+def _price_impact_pct(quote: Dict) -> float:
+    try:
+        impact = float(quote.get("priceImpactPct", 0) or 0)
+    except (TypeError, ValueError):
+        return 0.0
+    # Jupiter suele devolver decimal (0.01 = 1%), pero algunas rutas/API pueden
+    # devolver porcentaje ya escalado. Normalizamos sin castigar valores chicos.
+    return impact * 100 if abs(impact) <= 1 else impact
+
+
 async def get_jupiter_swap_transaction(quote: Dict, public_key: str) -> Optional[str]:
     """Returns base64 encoded swap transaction"""
+    payload = {
+        "quoteResponse": quote,
+        "userPublicKey": public_key,
+        "wrapAndUnwrapSol": True,
+        "dynamicComputeUnitLimit": True,
+        "asLegacyTransaction": False,
+    }
+    if config.JUPITER_DYNAMIC_SLIPPAGE:
+        payload["dynamicSlippage"] = True
+    if config.JUPITER_MAX_PRIORITY_LAMPORTS > 0:
+        payload["prioritizationFeeLamports"] = {
+            "priorityLevelWithMaxLamports": {
+                "maxLamports": config.JUPITER_MAX_PRIORITY_LAMPORTS,
+                "priorityLevel": config.JUPITER_PRIORITY_LEVEL,
+            }
+        }
+    else:
+        payload["prioritizationFeeLamports"] = 5000
+
     async with httpx.AsyncClient(timeout=15) as client:
         try:
-            r = await client.post(
-                config.JUPITER_SWAP_URL,
-                json={
-                    "quoteResponse": quote,
-                    "userPublicKey": public_key,
-                    "wrapAndUnwrapSol": True,
-                    "dynamicComputeUnitLimit": True,
-                    "prioritizationFeeLamports": 5000,  # ~0.000005 SOL priority fee
-                    "asLegacyTransaction": False,
-                }
-            )
+            r = await client.post(config.JUPITER_SWAP_URL, json=payload)
             if r.status_code == 200:
                 return r.json().get("swapTransaction")
+            # Fallback conservador: algunas variantes del endpoint no aceptan el
+            # objeto de prioridad. Reintenta con el formato simple anterior.
+            fallback = dict(payload)
+            fallback["prioritizationFeeLamports"] = 5000
+            fallback.pop("dynamicSlippage", None)
+            r2 = await client.post(config.JUPITER_SWAP_URL, json=fallback)
+            if r2.status_code == 200:
+                return r2.json().get("swapTransaction")
+            add_log("WARNING", f"Jupiter swap build status {r.status_code}/{r2.status_code}")
         except Exception as e:
             add_log("ERROR", f"Jupiter swap build error: {e}")
     return None
@@ -122,6 +150,10 @@ async def buy_token(
             add_log("WARNING", f"No hay cotizacion para {token_address} (intento {attempt+1})")
             await asyncio.sleep(2)
             continue
+        impact_pct = _price_impact_pct(quote)
+        if impact_pct > config.MAX_PRICE_IMPACT_PCT:
+            add_log("WARNING", f"Impacto de precio alto ({impact_pct:.1f}% > {config.MAX_PRICE_IMPACT_PCT:.1f}%) - no compro")
+            break
 
         out_amount = int(quote.get("outAmount", 0))
         if out_amount == 0:
@@ -140,12 +172,11 @@ async def buy_token(
 
             if confirmed:
                 # Calculate approximate price from quote
-                price_impact = float(quote.get("priceImpactPct", 0))
                 out_decimals = 6  # Most Solana tokens use 6 decimals
                 tokens_received = out_amount / (10 ** out_decimals)
                 price_usd = (sol_amount * await get_sol_price_usd()) / tokens_received if tokens_received > 0 else 0
 
-                add_log("TRADE", f"COMPRA exitosa: {sol_amount:.4f} SOL -> {tokens_received:.0f} tokens | TX: {signature[:16]}... | Impacto: {price_impact:.2f}%")
+                add_log("TRADE", f"COMPRA exitosa: {sol_amount:.4f} SOL -> {tokens_received:.0f} tokens | TX: {signature[:16]}... | Impacto: {impact_pct:.2f}%")
                 return True, tokens_received, price_usd, signature
             else:
                 add_log("WARNING", f"Tx no confirmada (intento {attempt+1}): {signature[:16]}...")
@@ -253,6 +284,9 @@ async def check_sellable(token_address: str, sol_amount: float) -> Tuple[bool, s
     if not buy_q or int(buy_q.get("outAmount", 0)) == 0:
         return False, "Sin ruta de compra (liquidez nula)"
     tokens_out = int(buy_q.get("outAmount", 0))
+    impact_pct = _price_impact_pct(buy_q)
+    if impact_pct > config.MAX_PRICE_IMPACT_PCT:
+        return False, f"Impacto de precio alto en compra ({impact_pct:.1f}%)"
 
     # 2. ¿Hay ruta de VENTA de vuelta? (token -> SOL). Si no, es honeypot.
     sell_q = await get_jupiter_quote(token_address, config.SOL_MINT, tokens_out)
@@ -268,11 +302,18 @@ async def check_sellable(token_address: str, sol_amount: float) -> Tuple[bool, s
     return True, ""
 
 
-def calculate_position_size(sol_balance: float) -> float:
+def calculate_position_size(sol_balance: float, score: float = 0.0, category: str = "") -> float:
     """
     Dynamic position sizing based on current balance.
     Never risk more than MAX_TRADE_PCT, never less than MIN_TRADE_SOL.
     """
-    size = sol_balance * config.MAX_TRADE_PCT
+    pct = config.MAX_TRADE_PCT
+    if score >= 75:
+        pct *= 1.15
+    elif score and score < 65:
+        pct *= 0.75
+    if category == "favorite":
+        pct *= 1.1
+    size = sol_balance * pct
     size = max(config.MIN_TRADE_SOL, min(size, sol_balance * 0.4))  # Hard cap at 40%
     return round(size, 4)

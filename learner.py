@@ -17,7 +17,6 @@ from database import (
 
 MIN_WEIGHT = 0.3
 MAX_WEIGHT = 3.0
-LEARNING_RATE = 0.08  # 8% max adjustment por iteracion
 
 
 def run_learning_cycle() -> Dict[str, float]:
@@ -25,7 +24,7 @@ def run_learning_cycle() -> Dict[str, float]:
     Main learning function. Called after each trade closes.
     Returns updated weights.
     """
-    raw_trades = get_recent_trades_for_learning(50)
+    raw_trades = get_recent_trades_for_learning(config.LEARNING_WINDOW_TRADES)
     trades = [
         t for t in raw_trades
         if abs(float(t.get("pnl_pct", 0) or 0)) >= config.LEARNING_MIN_ABS_PNL_PCT
@@ -39,7 +38,7 @@ def run_learning_cycle() -> Dict[str, float]:
 
     for trade in trades:
         pnl = trade.get("pnl_pct", 0) or 0
-        outcomes.append(pnl)
+        outcomes.append(max(-20.0, min(20.0, pnl)))
 
         scores_raw = trade.get("scores")
         if not scores_raw:
@@ -82,8 +81,8 @@ def run_learning_cycle() -> Dict[str, float]:
 
         # Positive correlation -> factor predicts profit -> increase weight
         # Negative correlation -> factor predicts loss -> decrease weight
-        adjustment = 1.0 + (corr * LEARNING_RATE)
-        adjustment = max(1.0 - LEARNING_RATE, min(1.0 + LEARNING_RATE, adjustment))
+        adjustment = 1.0 + (corr * config.LEARNING_RATE)
+        adjustment = max(1.0 - config.LEARNING_RATE, min(1.0 + config.LEARNING_RATE, adjustment))
 
         old = current_weights.get(factor, 1.0)
         new = old * adjustment
@@ -110,7 +109,7 @@ def run_learning_cycle() -> Dict[str, float]:
 def get_learning_summary() -> Dict:
     """Return human-readable learning stats"""
     weights = get_weights()
-    trades = get_trades(50)
+    trades = get_trades(config.LEARNING_WINDOW_TRADES)
     signal_trades = [
         t for t in trades
         if abs(float(t.get("pnl_pct", 0) or 0)) >= config.LEARNING_MIN_ABS_PNL_PCT
@@ -131,6 +130,8 @@ def get_learning_summary() -> Dict:
         "total_trades": len(trades),
         "signal_trades": len(signal_trades),
         "min_abs_pnl_pct": config.LEARNING_MIN_ABS_PNL_PCT,
+        "window_trades": config.LEARNING_WINDOW_TRADES,
+        "learning_rate": config.LEARNING_RATE,
         "wins": len(profitable),
         "losses": len(losing),
         "avg_win_pct": round(avg_win, 1),

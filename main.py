@@ -159,6 +159,132 @@ class BotEngine:
 
     # ── Buy signal callback ───────────────────────────────────────────────────
 
+    def _loss_pause_active(self) -> bool:
+        if config.MAX_CONSECUTIVE_LOSSES <= 0:
+            return False
+        streak = db.get_consecutive_losses(config.MAX_CONSECUTIVE_LOSSES)
+        if streak < config.MAX_CONSECUTIVE_LOSSES:
+            return False
+        last_min = db.minutes_since_last_trade_any()
+        if last_min is None or last_min >= config.LOSS_PAUSE_MINUTES:
+            return False
+        remaining = config.LOSS_PAUSE_MINUTES - last_min
+        db.add_log(
+            "INFO",
+            f"Pausa por mala racha: {streak} perdidas seguidas; espero {remaining:.0f}min antes de comprar"
+        )
+        return True
+
+    def _global_trade_cooldown_active(self) -> bool:
+        if config.GLOBAL_TRADE_COOLDOWN_SECONDS <= 0:
+            return False
+        try:
+            last_buy = float(db.get_state("last_buy_ts", "0") or 0)
+        except ValueError:
+            last_buy = 0
+        elapsed = time.time() - last_buy
+        if last_buy > 0 and elapsed < config.GLOBAL_TRADE_COOLDOWN_SECONDS:
+            remaining = config.GLOBAL_TRADE_COOLDOWN_SECONDS - elapsed
+            db.add_log("INFO", f"Cooldown global: espero {remaining:.0f}s antes del proximo trade")
+            return True
+        return False
+
+    def _token_recently_bad(self, stats: dict) -> bool:
+        if stats.get("trades", 0) < max(2, config.TOKEN_MAX_RECENT_LOSSES):
+            return False
+        return (
+            stats.get("losses", 0) >= config.TOKEN_MAX_RECENT_LOSSES
+            and stats.get("win_rate", 0) < config.TOKEN_MIN_RECENT_WIN_RATE
+            and stats.get("avg_pnl_pct", 0) <= config.TOKEN_MIN_RECENT_AVG_PNL_PCT
+        )
+
+    async def _entry_snapshot(self, address: str) -> Optional[dict]:
+        pair = await fetch_dexscreener(address)
+        if not pair:
+            return None
+        txns = pair.get("txns", {}) or {}
+        tx_m5 = txns.get("m5", {}) or {}
+        tx_h1 = txns.get("h1", {}) or {}
+        buys = (tx_m5.get("buys") or 0) + (tx_h1.get("buys") or 0)
+        sells = (tx_m5.get("sells") or 0) + (tx_h1.get("sells") or 0)
+        total = buys + sells
+        pc = pair.get("priceChange", {}) or {}
+        snap = {
+            "price": float(pair.get("priceUsd") or 0),
+            "change_m5": float(pc.get("m5") or 0),
+            "change_h1": float(pc.get("h1") or 0),
+            "liquidity": float((pair.get("liquidity", {}) or {}).get("usd") or 0),
+            "buy_ratio": (buys / total) if total > 0 else 0.0,
+            "txns": total,
+        }
+        bird = await self._birdeye_entry_snapshot(address)
+        if bird:
+            snap.update({k: v for k, v in bird.items() if v not in (None, "")})
+        return snap
+
+    async def _birdeye_entry_snapshot(self, address: str) -> Optional[dict]:
+        if not (config.ENABLE_BIRDEYE_ENTRY_DATA and config.BIRDEYE_API_KEY):
+            return None
+        try:
+            async with httpx.AsyncClient(timeout=8) as client:
+                r = await client.get(
+                    f"{config.BIRDEYE_BASE_URL}/defi/token_overview",
+                    params={"address": address},
+                    headers={"X-API-KEY": config.BIRDEYE_API_KEY, "x-chain": "solana"},
+                )
+            if r.status_code != 200:
+                return None
+            data = (r.json() or {}).get("data") or {}
+            buys = float(data.get("buy5m") or data.get("buy1h") or 0)
+            sells = float(data.get("sell5m") or data.get("sell1h") or 0)
+            total = buys + sells
+            return {
+                "price": float(data.get("price") or 0) or None,
+                "change_m5": float(data.get("priceChange5mPercent") or data.get("priceChange1hPercent") or 0),
+                "liquidity": float(data.get("liquidity") or 0) or None,
+                "buy_ratio": (buys / total) if total > 0 else None,
+                "txns": total or None,
+            }
+        except Exception:
+            return None
+
+    async def _confirm_entry_rebound(self, analysis: TokenAnalysis) -> tuple[bool, str]:
+        samples = []
+        sample_count = max(2, config.ENTRY_CONFIRM_SAMPLES)
+        for i in range(sample_count):
+            snap = await self._entry_snapshot(analysis.address)
+            if snap and snap["price"] > 0:
+                samples.append(snap)
+            if i < sample_count - 1:
+                await asyncio.sleep(config.ENTRY_CONFIRM_INTERVAL_SECONDS)
+
+        if len(samples) < 2:
+            return False, "sin suficientes datos vivos para confirmar rebote"
+
+        prices = [s["price"] for s in samples]
+        first, last, low = prices[0], prices[-1], min(prices)
+        prev = prices[-2]
+        bounce = ((last - low) / low * 100) if low > 0 else 0
+        extra_drop = ((low - first) / first * 100) if first > 0 else 0
+        buy_ratio = samples[-1].get("buy_ratio", 0)
+        change_m5 = samples[-1].get("change_m5", 0)
+        liquidity = samples[-1].get("liquidity", analysis.liquidity_usd)
+
+        if liquidity < config.MIN_LIQUIDITY_USD:
+            return False, f"liquidez viva baja ${liquidity:,.0f}"
+        if extra_drop < -config.ENTRY_CONFIRM_MAX_EXTRA_DROP_PCT:
+            return False, f"sigue cayendo durante confirmacion ({extra_drop:+.1f}%)"
+        if last < prev:
+            return False, "ultimo tick todavia cae; espero otro intento"
+        if bounce < config.ENTRY_CONFIRM_MIN_BOUNCE_PCT:
+            return False, f"rebote insuficiente desde minimo ({bounce:+.1f}%)"
+        if buy_ratio < config.ENTRY_CONFIRM_MIN_BUY_RATIO:
+            return False, f"compra/venta debil ({buy_ratio*100:.0f}% compras)"
+        if change_m5 < config.ENTRY_CONFIRM_MIN_5M_CHANGE_PCT:
+            return False, f"momentum 5m aun debil ({change_m5:+.1f}%)"
+
+        return True, f"rebote {bounce:+.1f}% desde minimo, compras {buy_ratio*100:.0f}%, 5m {change_m5:+.1f}%"
+
     async def on_buy_signal(self, analysis: TokenAnalysis):
         positions = db.get_open_positions()
         if len(positions) >= config.MAX_POSITIONS:
@@ -170,6 +296,16 @@ class BotEngine:
         sol_bal = await self._get_free_sol()
         if daily_pnl < -(sol_bal * config.MAX_DAILY_LOSS_PCT):
             await self.broadcast_log("WARNING", "Limite de perdida diaria alcanzado - trading pausado")
+            return
+        if db.get_trades_today_count() >= config.MAX_DAILY_TRADES:
+            await self.broadcast_log(
+                "INFO",
+                f"Limite diario de trades alcanzado ({config.MAX_DAILY_TRADES}) - espero mejores condiciones"
+            )
+            return
+        if self._loss_pause_active():
+            return
+        if self._global_trade_cooldown_active():
             return
 
         # Check we already have a position in this token
@@ -186,6 +322,16 @@ class BotEngine:
                 "INFO",
                 f"Cooldown {analysis.symbol}: ultimo trade hace {last_trade_min:.0f}min, "
                 f"espero {wait:.0f}min antes de recomprar"
+            )
+            return
+
+        token_stats = db.get_token_recent_stats(analysis.address, config.TOKEN_RECENT_HOURS)
+        if self._token_recently_bad(token_stats):
+            await self.broadcast_log(
+                "INFO",
+                f"Evito {analysis.symbol}: historial reciente flojo "
+                f"({token_stats['losses']} perdidas/{token_stats['trades']} trades, "
+                f"WR {token_stats['win_rate']:.0f}%, avg {token_stats['avg_pnl_pct']:+.1f}%)"
             )
             return
 
@@ -212,6 +358,13 @@ class BotEngine:
             return
 
         # ── SEGUNDO FILTRO: razonamiento LLM (Claude) ──────────────────────
+        if config.ENABLE_ENTRY_REBOUND_CONFIRMATION:
+            confirmed, reason = await self._confirm_entry_rebound(analysis)
+            if not confirmed:
+                await self.broadcast_log("INFO", f"Vigilando {analysis.symbol}: {reason}")
+                return
+            await self.broadcast_log("INFO", f"Rebote confirmado en {analysis.symbol}: {reason}")
+
         if llm_analyst.is_enabled():
             await self.broadcast_log("INFO", f"Consultando a la IA sobre {analysis.symbol}...")
             verdict = await llm_analyst.llm_review(analysis, self._sync_log)
@@ -240,7 +393,7 @@ class BotEngine:
                     f"🧠✅ La IA confirmó {analysis.symbol} ({conf}%): {reasoning}"
                 )
 
-        trade_sol = calculate_position_size(sol_bal)
+        trade_sol = calculate_position_size(sol_bal, analysis.scores.total if analysis.scores else 0, analysis.category)
 
         # ── ANTI-HONEYPOT: simula compra+venta antes de arriesgar dinero ──
         if config.ENABLE_HONEYPOT_CHECK:
@@ -262,6 +415,7 @@ class BotEngine:
         if not success:
             await self.broadcast_log("ERROR", f"Compra fallida: {analysis.name}")
             return
+        db.set_state("last_buy_ts", str(time.time()))
 
         if price_usd == 0 and analysis.price_usd > 0:
             price_usd = analysis.price_usd
@@ -335,6 +489,22 @@ class BotEngine:
                         })
 
                         # ── TAKE-PROFIT PARCIAL: vende una fraccion al llegar a Nx ──
+                        if (config.ENABLE_FAST_BREAKEVEN and buy_price > 0
+                                and highest >= buy_price * (1 + config.BREAKEVEN_AFTER_PCT / 100.0)):
+                            be_stop = buy_price * (1 + config.BREAKEVEN_STOP_PCT / 100.0)
+                            if (pos.get("stop_price_usd") or 0) < be_stop:
+                                db.update_position_levels(
+                                    pos["id"],
+                                    pos.get("target_price_usd") or buy_price * (1 + config.TAKE_PROFIT_PCT),
+                                    be_stop
+                                )
+                                pos["stop_price_usd"] = be_stop
+                                await self.broadcast_log(
+                                    "INFO",
+                                    f"Stop protegido {pos['token_symbol']}: pico +{(highest-buy_price)/buy_price*100:.1f}% "
+                                    f"-> stop {config.BREAKEVEN_STOP_PCT:+.1f}%"
+                                )
+
                         if (config.ENABLE_PARTIAL_TP and not pos.get("partial_taken")
                                 and buy_price > 0
                                 and current_price >= buy_price * (1 + config.PARTIAL_TP_TRIGGER_PCT)):
@@ -742,10 +912,20 @@ class BotEngine:
         else:
             await self.broadcast_log("INFO", "Filtro LLM desactivado - solo analisis algoritmico (gratis)")
 
+        if config.ENABLE_ENTRY_REBOUND_CONFIRMATION:
+            await self.broadcast_log(
+                "INFO",
+                f"Entrada profunda ACTIVA: dip + rebote confirmado "
+                f"({config.ENTRY_CONFIRM_SAMPLES} muestras cada {config.ENTRY_CONFIRM_INTERVAL_SECONDS:.0f}s, "
+                f"rebote min +{config.ENTRY_CONFIRM_MIN_BOUNCE_PCT:.1f}%, compras min {config.ENTRY_CONFIRM_MIN_BUY_RATIO*100:.0f}%)"
+            )
+
         # Resumen de la estrategia de salida y protecciones
         exit_parts = []
         if config.ENABLE_PARTIAL_TP:
             exit_parts.append(f"TP parcial {config.PARTIAL_TP_SELL_FRACTION*100:.0f}% a +{config.PARTIAL_TP_TRIGGER_PCT*100:.0f}%")
+        if config.ENABLE_FAST_BREAKEVEN:
+            exit_parts.append(f"breakeven +{config.BREAKEVEN_STOP_PCT:.1f}% tras +{config.BREAKEVEN_AFTER_PCT:.0f}%")
         if config.ENABLE_TRAILING_STOP:
             exit_parts.append(f"trailing stop {config.TRAILING_STOP_PCT*100:.0f}%")
         else:
@@ -762,6 +942,8 @@ class BotEngine:
         protecciones.append(f"lista negra ({bl_count} vetadas)")
         fav_count = len(db.get_favorites())
         protecciones.append(f"favoritas ({fav_count} vigiladas)")
+        protecciones.append(f"max {config.MAX_DAILY_TRADES} trades/dia")
+        protecciones.append(f"pausa {config.LOSS_PAUSE_MINUTES:.0f}min tras {config.MAX_CONSECUTIVE_LOSSES} perdidas")
         if protecciones:
             await self.broadcast_log("INFO", "Protecciones activas: " + ", ".join(protecciones))
 
@@ -868,6 +1050,9 @@ def _compute_exit_plan(p: dict) -> dict:
     if config.ENABLE_PARTIAL_TP and not p.get("partial_taken"):
         plan["partial_tp_price"] = round(buy * (1 + config.PARTIAL_TP_TRIGGER_PCT), 10)
         plan["partial_tp_pct"] = round(config.PARTIAL_TP_TRIGGER_PCT * 100)
+    if config.ENABLE_FAST_BREAKEVEN:
+        plan["breakeven_after_pct"] = round(config.BREAKEVEN_AFTER_PCT, 1)
+        plan["breakeven_stop_pct"] = round(config.BREAKEVEN_STOP_PCT, 1)
     # Objetivo (take-profit): activo si lo gestiona la IA o si no hay trailing
     if ai_managed or not config.ENABLE_TRAILING_STOP:
         plan["take_profit_price"] = p.get("target_price_usd")

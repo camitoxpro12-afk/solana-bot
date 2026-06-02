@@ -329,6 +329,64 @@ def minutes_since_last_trade(token_address: str) -> Optional[float]:
     return float(row["minutes"])
 
 
+def minutes_since_last_trade_any() -> Optional[float]:
+    """Minutos desde cualquier ultimo cierre, o None si no hay trades."""
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT (strftime('%s','now') - strftime('%s', MAX(sell_time))) / 60.0 AS minutes FROM trades"
+        ).fetchone()
+    if not row or row["minutes"] is None:
+        return None
+    return float(row["minutes"])
+
+
+def get_trades_today_count() -> int:
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT COUNT(*) FROM trades WHERE date(sell_time) = date('now')"
+        ).fetchone()
+    return int(row[0] or 0) if row else 0
+
+
+def get_consecutive_losses(limit: int = 5) -> int:
+    """Cuenta perdidas consecutivas desde el trade mas reciente."""
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT pnl_sol FROM trades ORDER BY sell_time DESC LIMIT ?",
+            (limit,)
+        ).fetchall()
+    streak = 0
+    for row in rows:
+        if (row["pnl_sol"] or 0) <= 0:
+            streak += 1
+        else:
+            break
+    return streak
+
+
+def get_token_recent_stats(token_address: str, hours: float = 24) -> Dict:
+    """Resumen de los trades recientes de una moneda para evitar recompras malas."""
+    with get_conn() as conn:
+        rows = conn.execute(
+            """SELECT pnl_sol, pnl_pct FROM trades
+               WHERE token_address = ?
+                 AND sell_time >= datetime('now', ?)
+               ORDER BY sell_time DESC""",
+            (token_address, f"-{hours} hours")
+        ).fetchall()
+    total = len(rows)
+    wins = sum(1 for r in rows if (r["pnl_sol"] or 0) > 0)
+    losses = total - wins
+    avg = sum((r["pnl_pct"] or 0) for r in rows) / total if total else 0.0
+    return {
+        "trades": total,
+        "wins": wins,
+        "losses": losses,
+        "win_rate": (wins / total * 100) if total else 0.0,
+        "avg_pnl_pct": avg,
+    }
+
+
 def get_daily_pnl() -> float:
     with get_conn() as conn:
         row = conn.execute(

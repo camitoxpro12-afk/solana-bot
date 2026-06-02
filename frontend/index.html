@@ -477,6 +477,9 @@ function exitPlanHtml(plan) {
   } else if (plan.partial_tp_price) {
     lines.push(`🎯 Vende la MITAD si sube a +${plan.partial_tp_pct}% (${px(plan.partial_tp_price)})`);
   }
+  if (plan.breakeven_after_pct !== undefined) {
+    lines.push(`🛡 Al llegar a +${plan.breakeven_after_pct}% mueve stop a +${plan.breakeven_stop_pct}%`);
+  }
   // Objetivo de ganancia (take-profit): visible si la IA lo gestiona o si no hay trailing
   if (plan.take_profit_price) {
     const tp = plan.take_profit_pct;
