@@ -523,6 +523,7 @@ def _extract_tagged_json(text: str, tag: str) -> Optional[Dict]:
 # y si uno falla (limite/error) saltamos al siguiente al instante.
 _pool_idx = [0]
 _key_idx: Dict[str, int] = {}
+_provider_cooldown_until: Dict[str, float] = {}
 
 
 def _keys_of(raw: str) -> list:
@@ -536,6 +537,16 @@ def _next_key(name: str, raw: str) -> Optional[str]:
     i = _key_idx.get(name, 0)
     _key_idx[name] = i + 1
     return keys[i % len(keys)]
+
+
+def _provider_available_now(name: str) -> bool:
+    return time.time() >= _provider_cooldown_until.get(name, 0.0)
+
+
+def _cooldown_provider(name: str, label: str, log_fn, seconds: Optional[int] = None):
+    wait = seconds or config.LLM_PROVIDER_COOLDOWN_SECONDS
+    _provider_cooldown_until[name] = time.time() + wait
+    log_fn("WARNING", f"{label} rate-limit/429 - pausa {wait}s y uso otro proveedor")
 
 
 def _groq_available() -> bool:
@@ -555,6 +566,8 @@ def _any_free_available() -> bool:
 
 
 async def _gemini_ask(system_prompt: str, user_msg: str, max_tokens: int, log_fn) -> Optional[str]:
+    if not _provider_available_now("gemini"):
+        return None
     key = _next_gemini_key()
     if not key:
         return None
@@ -575,7 +588,10 @@ async def _gemini_ask(system_prompt: str, user_msg: str, max_tokens: int, log_fn
                 parts = cands[0].get("content", {}).get("parts", [])
                 return (" ".join(p.get("text", "") for p in parts)) or None
         else:
-            log_fn("WARNING", f"Gemini error {r.status_code}")
+            if r.status_code == 429:
+                _cooldown_provider("gemini", "Gemini", log_fn)
+            else:
+                log_fn("WARNING", f"Gemini error {r.status_code}")
     except Exception as e:
         log_fn("WARNING", f"Gemini fallo: {e}")
     return None
@@ -584,6 +600,8 @@ async def _gemini_ask(system_prompt: str, user_msg: str, max_tokens: int, log_fn
 async def _openai_ask(name: str, base_url: str, model: str, key_raw: str, label: str,
                       system_prompt: str, user_msg: str, max_tokens: int, log_fn) -> Optional[str]:
     """Llamada generica a cualquier proveedor compatible con OpenAI (Groq/Cerebras/OpenRouter)."""
+    if not _provider_available_now(name):
+        return None
     key = _next_key(name, key_raw)
     if not key:
         return None
@@ -611,7 +629,15 @@ async def _openai_ask(name: str, base_url: str, model: str, key_raw: str, label:
                 # si viene vacia, usamos 'reasoning' como respaldo para no perder la respuesta.
                 return (msg.get("content") or msg.get("reasoning")) or None
         else:
-            log_fn("WARNING", f"{label} error {r.status_code}")
+            if r.status_code == 429:
+                retry_after = r.headers.get("retry-after")
+                try:
+                    wait = min(900, max(30, int(float(retry_after)))) if retry_after else None
+                except (TypeError, ValueError):
+                    wait = None
+                _cooldown_provider(name, label, log_fn, wait)
+            else:
+                log_fn("WARNING", f"{label} error {r.status_code}")
     except Exception as e:
         log_fn("WARNING", f"{label} fallo: {e}")
     return None
@@ -621,17 +647,17 @@ def _free_providers() -> list:
     """IAs gratis disponibles, cada una con una llamada uniforme (system, user, max_tokens, log).
     Cada item es (id, etiqueta, callable)."""
     provs = []
-    if _gemini_available():
+    if _gemini_available() and _provider_available_now("gemini"):
         provs.append(("gemini", "Gemini gratis", _gemini_ask))
-    if _groq_available():
+    if _groq_available() and _provider_available_now("groq"):
         provs.append(("groq", f"Groq ({config.GROQ_MODEL})",
                       lambda s, u, m, lf: _openai_ask("groq", config.GROQ_BASE_URL, config.GROQ_MODEL,
                                                       config.GROQ_API_KEY, "Groq", s, u, m, lf)))
-    if _cerebras_available():
+    if _cerebras_available() and _provider_available_now("cerebras"):
         provs.append(("cerebras", f"Cerebras ({config.CEREBRAS_MODEL})",
                       lambda s, u, m, lf: _openai_ask("cerebras", config.CEREBRAS_BASE_URL, config.CEREBRAS_MODEL,
                                                       config.CEREBRAS_API_KEY, "Cerebras", s, u, m, lf)))
-    if _openrouter_available():
+    if _openrouter_available() and _provider_available_now("openrouter"):
         provs.append(("openrouter", f"OpenRouter ({config.OPENROUTER_MODEL})",
                       lambda s, u, m, lf: _openai_ask("openrouter", config.OPENROUTER_BASE_URL, config.OPENROUTER_MODEL,
                                                       config.OPENROUTER_API_KEY, "OpenRouter", s, u, m, lf)))

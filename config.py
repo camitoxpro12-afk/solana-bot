@@ -136,6 +136,7 @@ LLM_USE_OPENROUTER = os.getenv("LLM_USE_OPENROUTER", "true").lower() == "true"
 LLM_ENTRY_PROVIDER = os.getenv("LLM_ENTRY_PROVIDER", "gemini")      # filtro/decision de compra
 LLM_EXIT_PROVIDER = os.getenv("LLM_EXIT_PROVIDER", "groq")          # posiciones abiertas (rapidez)
 LLM_SOL_PROVIDER = os.getenv("LLM_SOL_PROVIDER", "cerebras")        # analisis experto de SOL
+LLM_PROVIDER_COOLDOWN_SECONDS = int(os.getenv("LLM_PROVIDER_COOLDOWN_SECONDS", "180"))
 
 # Intervals (seconds)
 SCAN_INTERVAL = int(os.getenv("SCAN_INTERVAL", "30"))
