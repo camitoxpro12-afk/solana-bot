@@ -750,6 +750,8 @@ Como pensar (estilo scalping "comprar la bajada, vender el rebote"):
 - Si el rebote se AGOTA o se gira (cae del maximo, mas ventas que compras): aprieta el stop cerca del precio o vende ya.
 - Si lleva tiempo plano/cayendo sin reaccionar: mejor salir y buscar otra.
 - Si ya hay buena ganancia: protege subiendo el stop a positivo (asegura beneficio).
+- Evita micro-ganancias inutiles: un objetivo normal debe buscar al menos +8% si la estructura sigue viva.
+- No subas el stop a breakeven/+0% demasiado pronto. Antes de +4% de ganancia, deja margen al trade o vende directamente si el riesgo es claro.
 
 Las reglas rapidas ejecutan tu target/stop AL INSTANTE; tu solo defines DONDE estan. Se decisivo y breve.
 

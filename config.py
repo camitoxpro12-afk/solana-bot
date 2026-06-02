@@ -50,6 +50,10 @@ AI_EXIT_MIN_CONFIDENCE = float(os.getenv("AI_EXIT_MIN_CONFIDENCE", "60"))  # sol
 # La IA mueve el objetivo y el stop (regla dinamica). Si lo apagas, solo decide vender/mantener.
 ENABLE_AI_DYNAMIC_LEVELS = os.getenv("ENABLE_AI_DYNAMIC_LEVELS", "true").lower() == "true"
 AI_EXIT_SUMMARY_EVERY = int(os.getenv("AI_EXIT_SUMMARY_EVERY", "3"))  # loguea resumen aunque el plan no cambie cada N revisiones
+# Evita que la IA convierta todos los trades en micro-ganancias que no compensan.
+AI_EXIT_MIN_TARGET_PCT = float(os.getenv("AI_EXIT_MIN_TARGET_PCT", "8"))        # objetivo minimo util
+AI_EXIT_LOCK_PROFIT_AFTER_PCT = float(os.getenv("AI_EXIT_LOCK_PROFIT_AFTER_PCT", "4"))  # solo asegurar breakeven tras +4%
+AI_EXIT_EARLY_MAX_STOP_PCT = float(os.getenv("AI_EXIT_EARLY_MAX_STOP_PCT", "-5"))       # antes de +4%, stop no mas apretado que -5%
 
 # === MONEDAS FAVORITAS (las ganadoras se guardan y re-analizan para volver a entrar) ===
 # Si un trade cierra ganando >= este %, la moneda se guarda como "favorita" y el escaner

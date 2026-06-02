@@ -599,10 +599,19 @@ class BotEngine:
         stp_pct = review.get("stop_pct")
         new_target = pos.get("target_price_usd") or 0
         new_stop = pos.get("stop_price_usd") or 0
+        pnl_pct = ((cur - buy) / buy * 100) if buy > 0 else 0
 
         if tgt_pct is not None:
+            # No aceptar objetivos microscopicos: en real se los comen slippage/fees.
+            tgt_pct = max(float(tgt_pct), config.AI_EXIT_MIN_TARGET_PCT)
             new_target = buy * (1 + tgt_pct / 100.0)
         if stp_pct is not None:
+            stp_pct = float(stp_pct)
+            # Antes de que el trade tenga ganancia real, no mover el stop a breakeven
+            # por miedo: eso cerraba demasiadas posiciones en +0.0% / +0.3%.
+            if pnl_pct < config.AI_EXIT_LOCK_PROFIT_AFTER_PCT:
+                floor = -config.STOP_LOSS_PCT * 100
+                stp_pct = min(max(stp_pct, floor), config.AI_EXIT_EARLY_MAX_STOP_PCT)
             new_stop = buy * (1 + stp_pct / 100.0)
 
         # Seguridad: el objetivo por encima del precio actual y el stop por debajo
@@ -706,7 +715,9 @@ class BotEngine:
             await self.broadcast_log(
                 "INFO",
                 f"Salida con IA ACTIVA - re-evalua cada posicion cada {config.AI_EXIT_INTERVAL}s ({modo_ia}); "
-                f"el gatillo rapido la ejecuta cada {config.PRICE_CHECK_INTERVAL}s"
+                f"target minimo +{config.AI_EXIT_MIN_TARGET_PCT:.0f}% | "
+                f"protege breakeven desde +{config.AI_EXIT_LOCK_PROFIT_AFTER_PCT:.0f}% | "
+                f"gatillo rapido cada {config.PRICE_CHECK_INTERVAL}s"
             )
 
         # Wallet: obligatoria solo en modo REAL; en simulacion es opcional.
