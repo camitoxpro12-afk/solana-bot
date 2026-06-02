@@ -60,6 +60,7 @@ AI_EXIT_EARLY_MAX_STOP_PCT = float(os.getenv("AI_EXIT_EARLY_MAX_STOP_PCT", "-5")
 # la vigila constantemente para re-entrar en su proxima bajada (re-trade).
 FAVORITE_MIN_WIN_PCT = float(os.getenv("FAVORITE_MIN_WIN_PCT", "5"))
 FAVORITE_RESCAN_MINUTES = float(os.getenv("FAVORITE_RESCAN_MINUTES", "3"))  # re-analiza favoritas cada X min
+RETRADE_COOLDOWN_MINUTES = float(os.getenv("RETRADE_COOLDOWN_MINUTES", "45"))  # espera antes de recomprar la misma moneda
 # Concentracion de holders: si el top 10 de wallets posee mas de este % -> RECHAZO DURO.
 # Esas monedas son las que hacen RUG PULL (un solo duenyo tira todo el supply de golpe).
 # Bajado a 40 tras detectar que TODOS los rugs tenian holders muy concentrados.

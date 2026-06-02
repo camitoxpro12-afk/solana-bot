@@ -161,6 +161,18 @@ class BotEngine:
             return
 
         # ── FILTRO DE MERCADO: no comprar memecoins si SOL esta bajista ────
+        # Evita churn: recomprar la misma moneda minutos despues suele producir
+        # micro-ganancias/perdidas y mucho ruido. Espera a que arme otra estructura.
+        last_trade_min = db.minutes_since_last_trade(analysis.address)
+        if last_trade_min is not None and last_trade_min < config.RETRADE_COOLDOWN_MINUTES:
+            wait = config.RETRADE_COOLDOWN_MINUTES - last_trade_min
+            await self.broadcast_log(
+                "INFO",
+                f"Cooldown {analysis.symbol}: ultimo trade hace {last_trade_min:.0f}min, "
+                f"espero {wait:.0f}min antes de recomprar"
+            )
+            return
+
         if config.ENABLE_MARKET_FILTER:
             try:
                 import sol_market

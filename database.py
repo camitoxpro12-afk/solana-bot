@@ -316,6 +316,19 @@ def get_trades(limit: int = 50) -> List[Dict]:
     return [dict(r) for r in rows]
 
 
+def minutes_since_last_trade(token_address: str) -> Optional[float]:
+    """Minutos desde el ultimo cierre de este token, o None si nunca se opero."""
+    with get_conn() as conn:
+        row = conn.execute(
+            """SELECT (strftime('%s','now') - strftime('%s', MAX(sell_time))) / 60.0 AS minutes
+               FROM trades WHERE token_address = ?""",
+            (token_address,)
+        ).fetchone()
+    if not row or row["minutes"] is None:
+        return None
+    return float(row["minutes"])
+
+
 def get_daily_pnl() -> float:
     with get_conn() as conn:
         row = conn.execute(
