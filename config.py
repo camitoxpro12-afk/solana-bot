@@ -52,6 +52,7 @@ ENABLE_AI_DYNAMIC_LEVELS = os.getenv("ENABLE_AI_DYNAMIC_LEVELS", "true").lower()
 AI_EXIT_SUMMARY_EVERY = int(os.getenv("AI_EXIT_SUMMARY_EVERY", "3"))  # loguea resumen aunque el plan no cambie cada N revisiones
 # Evita que la IA convierta todos los trades en micro-ganancias que no compensan.
 AI_EXIT_MIN_TARGET_PCT = float(os.getenv("AI_EXIT_MIN_TARGET_PCT", "8"))        # objetivo minimo util
+AI_EXIT_MIN_SELL_PROFIT_PCT = float(os.getenv("AI_EXIT_MIN_SELL_PROFIT_PCT", "2"))  # venta IA minima si sale en ganancia
 AI_EXIT_LOCK_PROFIT_AFTER_PCT = float(os.getenv("AI_EXIT_LOCK_PROFIT_AFTER_PCT", "4"))  # solo asegurar breakeven tras +4%
 AI_EXIT_EARLY_MAX_STOP_PCT = float(os.getenv("AI_EXIT_EARLY_MAX_STOP_PCT", "-5"))       # antes de +4%, stop no mas apretado que -5%
 

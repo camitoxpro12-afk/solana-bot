@@ -605,6 +605,18 @@ class BotEngine:
 
             # 1) VENDER YA si la IA esta segura
             if review.get("action") == "sell" and review.get("confidence", 0) >= config.AI_EXIT_MIN_CONFIDENCE:
+                allowed, gate_reason = self._ai_sell_allowed(pos, cur)
+                if not allowed:
+                    await self.broadcast_log(
+                        "INFO",
+                        f"IA quiso salir de {pos['token_symbol']}, pero se bloquea venta micro: {gate_reason}"
+                    )
+                    review["action"] = "hold"
+                    if config.ENABLE_AI_DYNAMIC_LEVELS:
+                        await self._apply_ai_levels(pos, review, cur)
+                    else:
+                        await self._log_ai_hold_summary(pos, review, cur)
+                    continue
                 await self.broadcast_log(
                     "TRADE",
                     f"🧠 La IA recomienda SALIR de {pos['token_symbol']} ({review['confidence']}%): {review['reason']}"
@@ -617,6 +629,29 @@ class BotEngine:
                 await self._apply_ai_levels(pos, review, cur)
             else:
                 await self._log_ai_hold_summary(pos, review, cur)
+
+    def _ai_sell_allowed(self, pos: dict, cur: float) -> tuple[bool, str]:
+        buy = pos.get("buy_price_usd") or 0
+        if buy <= 0 or cur <= 0:
+            return True, "precio invalido, se permite salida defensiva"
+
+        pnl_pct = (cur - buy) / buy * 100
+        highest = pos.get("highest_price_usd") or buy
+        high_pct = (highest - buy) / buy * 100 if highest > 0 else pnl_pct
+
+        if pnl_pct <= config.AI_EXIT_EARLY_MAX_STOP_PCT:
+            return True, f"perdida {pnl_pct:+.1f}% supera limite defensivo"
+        if pnl_pct >= config.AI_EXIT_MIN_TARGET_PCT:
+            return True, f"ganancia {pnl_pct:+.1f}% supera objetivo minimo"
+        if high_pct >= config.AI_EXIT_MIN_TARGET_PCT and pnl_pct >= config.AI_EXIT_MIN_SELL_PROFIT_PCT:
+            return True, f"protege ganancia util {pnl_pct:+.1f}% tras pico {high_pct:+.1f}%"
+
+        return (
+            False,
+            f"PnL {pnl_pct:+.1f}% / pico {high_pct:+.1f}%; minimo venta IA "
+            f"+{config.AI_EXIT_MIN_SELL_PROFIT_PCT:.0f}% tras pico +{config.AI_EXIT_MIN_TARGET_PCT:.0f}% "
+            f"o stop defensivo {config.AI_EXIT_EARLY_MAX_STOP_PCT:.0f}%"
+        )
 
     async def _apply_ai_levels(self, pos: dict, review: dict, cur: float):
         """Aplica el objetivo/stop que decide la IA. Las reglas rapidas los ejecutaran al instante."""
