@@ -93,7 +93,10 @@ class BotEngine:
             if start_sol > 0:
                 db.set_state("paper_start_sol", str(start_sol))
         committed = sum(p.get("amount_sol", 0) for p in db.get_open_positions())
-        return max(0.0, start_sol + db.get_total_pnl() - committed)
+        swing_parked = 0.0
+        if db.get_state("sol_swing_state", "risk_on") == "risk_off":
+            swing_parked = float(db.get_state("sol_swing_sol_parked", "0") or 0)
+        return max(0.0, start_sol + db.get_total_pnl() - committed - swing_parked)
 
     async def get_status(self) -> dict:
         sol_usd, sol_eur = await self.get_sol_prices()
@@ -112,6 +115,17 @@ class BotEngine:
             cur_val = p["amount_sol"] * (cp / bp) if bp > 0 else p.get("amount_sol", 0)
             invested += cur_val
             unrealized += cur_val - p.get("amount_sol", 0)
+
+        swing_value_sol = 0.0
+        swing_unrealized = 0.0
+        if db.get_state("sol_swing_state", "risk_on") == "risk_off":
+            swing_usdc = float(db.get_state("sol_swing_usdc", "0") or 0)
+            swing_parked = float(db.get_state("sol_swing_sol_parked", "0") or 0)
+            if sol_usd > 0 and swing_usdc > 0:
+                swing_value_sol = swing_usdc / sol_usd
+                swing_unrealized = swing_value_sol - swing_parked
+                invested += swing_value_sol
+                unrealized += swing_unrealized
         equity = free_sol + invested  # patrimonio total
 
         return {
@@ -125,6 +139,8 @@ class BotEngine:
             "invested_eur": round(invested * sol_eur, 2),
             "unrealized_pnl_sol": round(unrealized, 4),
             "unrealized_pnl_eur": round(unrealized * sol_eur, 2),
+            "swing_value_sol": round(swing_value_sol, 4),
+            "swing_unrealized_pnl_sol": round(swing_unrealized, 4),
             "sol_price_eur": round(sol_eur, 2),
             "sol_price_usd": round(sol_usd, 2),
             "total_pnl_sol": round(db.get_total_pnl(), 4),
@@ -904,7 +920,21 @@ async def get_sol_market_endpoint():
     data["swing_state"] = db.get_state("sol_swing_state", "risk_on")
     data["swing_usdc"] = float(db.get_state("sol_swing_usdc", "0") or 0)
     data["swing_protected_sol"] = float(db.get_state("sol_swing_sol_parked", "0") or 0) if data["swing_state"] == "risk_off" else 0.0
+    data["swing_value_sol"] = 0.0
+    data["swing_open_pnl_sol"] = 0.0
+    data["swing_open_pnl_pct"] = 0.0
+    if data["swing_state"] == "risk_off" and data.get("price_usd", 0) > 0 and data["swing_usdc"] > 0:
+        data["swing_value_sol"] = round(data["swing_usdc"] / data["price_usd"], 4)
+        data["swing_open_pnl_sol"] = round(data["swing_value_sol"] - data["swing_protected_sol"], 4)
+        data["swing_open_pnl_pct"] = round(
+            (data["swing_open_pnl_sol"] / data["swing_protected_sol"] * 100)
+            if data["swing_protected_sol"] > 0 else 0,
+            2
+        )
     data["swing_pct"] = config.SOL_SWING_PCT
+    data["swing_enter_score"] = config.SOL_SWING_ENTER_SCORE
+    data["swing_exit_score"] = config.SOL_SWING_EXIT_SCORE
+    data["swing_interval"] = config.SOL_SWING_INTERVAL
     swing = db.get_swing_stats()
     data["swing_trades"] = swing["count"]
     data["swing_pnl_sol"] = swing["pnl_sol"]

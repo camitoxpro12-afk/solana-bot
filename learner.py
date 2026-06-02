@@ -9,6 +9,7 @@ no-predictivos se reducen. Equivalente a un gradient descent simplificado.
 import json
 import numpy as np
 from typing import Dict
+import config
 from database import (
     get_weights, save_weights, get_recent_trades_for_learning,
     get_trades, add_log
@@ -17,7 +18,6 @@ from database import (
 MIN_WEIGHT = 0.3
 MAX_WEIGHT = 3.0
 LEARNING_RATE = 0.08  # 8% max adjustment por iteracion
-MIN_TRADES_TO_LEARN = 5
 
 
 def run_learning_cycle() -> Dict[str, float]:
@@ -25,8 +25,12 @@ def run_learning_cycle() -> Dict[str, float]:
     Main learning function. Called after each trade closes.
     Returns updated weights.
     """
-    trades = get_recent_trades_for_learning(30)
-    if len(trades) < MIN_TRADES_TO_LEARN:
+    raw_trades = get_recent_trades_for_learning(50)
+    trades = [
+        t for t in raw_trades
+        if abs(float(t.get("pnl_pct", 0) or 0)) >= config.LEARNING_MIN_ABS_PNL_PCT
+    ]
+    if len(trades) < config.LEARNING_MIN_TRADES:
         return get_weights()
 
     # Parse scores and outcomes
@@ -51,7 +55,7 @@ def run_learning_cycle() -> Dict[str, float]:
         except Exception:
             pass
 
-    if not factor_scores or len(outcomes) < MIN_TRADES_TO_LEARN:
+    if not factor_scores or len(outcomes) < config.LEARNING_MIN_TRADES:
         return get_weights()
 
     outcomes_arr = np.array(outcomes, dtype=float)
@@ -60,7 +64,7 @@ def run_learning_cycle() -> Dict[str, float]:
 
     adjustments = {}
     for factor, scores_list in factor_scores.items():
-        if len(scores_list) < MIN_TRADES_TO_LEARN:
+        if len(scores_list) < config.LEARNING_MIN_TRADES:
             continue
 
         # Pad/truncate to same length
@@ -107,6 +111,10 @@ def get_learning_summary() -> Dict:
     """Return human-readable learning stats"""
     weights = get_weights()
     trades = get_trades(50)
+    signal_trades = [
+        t for t in trades
+        if abs(float(t.get("pnl_pct", 0) or 0)) >= config.LEARNING_MIN_ABS_PNL_PCT
+    ]
 
     profitable = [t for t in trades if t.get("pnl_sol", 0) > 0]
     losing = [t for t in trades if t.get("pnl_sol", 0) <= 0]
@@ -121,6 +129,8 @@ def get_learning_summary() -> Dict:
 
     return {
         "total_trades": len(trades),
+        "signal_trades": len(signal_trades),
+        "min_abs_pnl_pct": config.LEARNING_MIN_ABS_PNL_PCT,
         "wins": len(profitable),
         "losses": len(losing),
         "avg_win_pct": round(avg_win, 1),

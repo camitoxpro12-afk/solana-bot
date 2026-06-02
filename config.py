@@ -148,6 +148,7 @@ MAX_DAILY_LOSS_PCT = float(os.getenv("MAX_DAILY_LOSS_PCT", "0.25"))
 ENABLE_TRADING = os.getenv("ENABLE_TRADING", "true").lower() == "true"
 # Balance virtual inicial en modo simulacion (paper). En modo real usa el de la wallet.
 PAPER_START_EUR = float(os.getenv("PAPER_START_EUR", "50"))
+PAPER_SOL_PRICE_USD = float(os.getenv("PAPER_SOL_PRICE_USD", "80"))
 
 # === ESTRATEGIA DE SALIDA AVANZADA ===
 # Take-profit parcial: vende una fraccion al llegar a Nx para recuperar capital
@@ -176,10 +177,14 @@ USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"  # dolar estable
 # === SWING TRADING DE SOL (rotar SOL <-> USDC segun el mercado) ===
 # Mantiene SOL cuando el mercado esta alcista; lo protege en USDC cuando esta bajista.
 ENABLE_SOL_SWING = os.getenv("ENABLE_SOL_SWING", "true").lower() == "true"
-SOL_SWING_PCT = float(os.getenv("SOL_SWING_PCT", "0.3"))            # % del balance que gestiona el swing
+SOL_SWING_PCT = float(os.getenv("SOL_SWING_PCT", "0.4"))            # % del balance que gestiona el swing
 SOL_SWING_ENTER_SCORE = float(os.getenv("SOL_SWING_ENTER_SCORE", "55"))  # vuelve a SOL si senal >=
-SOL_SWING_EXIT_SCORE = float(os.getenv("SOL_SWING_EXIT_SCORE", "35"))    # protege en USDC si senal <=
-SOL_SWING_INTERVAL = int(os.getenv("SOL_SWING_INTERVAL", "600"))         # revisa cada 10 min
+SOL_SWING_EXIT_SCORE = float(os.getenv("SOL_SWING_EXIT_SCORE", "42"))    # protege en USDC si senal <=
+SOL_SWING_INTERVAL = int(os.getenv("SOL_SWING_INTERVAL", "300"))         # revisa cada 5 min
+
+# Aprendizaje: ignora micro-resultados porque no son senal real (slippage/ruido).
+LEARNING_MIN_TRADES = int(os.getenv("LEARNING_MIN_TRADES", "8"))
+LEARNING_MIN_ABS_PNL_PCT = float(os.getenv("LEARNING_MIN_ABS_PNL_PCT", "1.0"))
 
 # Jupiter API (lite-api = gratis, sin key). La vieja quote-api.jup.ag fue retirada.
 JUPITER_QUOTE_URL = os.getenv("JUPITER_QUOTE_URL", "https://lite-api.jup.ag/swap/v1/quote")

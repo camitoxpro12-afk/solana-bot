@@ -531,10 +531,11 @@ async function loadLearning() {
   c.innerHTML = `
     <div style="display:flex;gap:20px;margin-bottom:16px;font-size:13px">
       <div>Trades: <b>${d.total_trades}</b></div>
+      <div>Con seÃ±al: <b>${d.signal_trades||0}</b></div>
       <div style="color:var(--green)">Ganados: <b>${d.wins}</b></div>
       <div style="color:var(--red)">Perdidos: <b>${d.losses}</b></div>
     </div>
-    <div style="font-size:12px;color:var(--muted);margin-bottom:10px">Pesos aprendidos (el bot prioriza los factores que predicen ganancias):</div>
+    <div style="font-size:12px;color:var(--muted);margin-bottom:10px">Pesos aprendidos (ignora trades menores a Â±${d.min_abs_pnl_pct||1}% porque suelen ser ruido/slippage):</div>
     <div class="learning-bars">
       ${Object.entries(weights).map(([k,v])=>`
         <div class="lbar">
@@ -721,15 +722,18 @@ async function loadSolMarket() {
     const sc = ro ? 'var(--yellow)' : 'var(--green)';
     const sp = d.swing_pnl_sol || 0;
     const spc = sp >= 0 ? 'var(--green)' : 'var(--red)';
+    const openSwing = d.swing_open_pnl_sol || 0;
+    const openSwingColor = openSwing >= 0 ? 'var(--green)' : 'var(--red)';
     swing = `<div style="background:var(--panel2);border-radius:8px;padding:10px 12px;margin-bottom:12px;border-left:3px solid ${sc}">
       <div style="display:flex;align-items:center;gap:8px">
         <span style="font-size:18px">${ro?'🛡️':'🟢'}</span>
         <div style="flex:1">
           <div style="font-size:12px;color:var(--muted)">🔄 Trading de SOL (swing · ${Math.round((d.swing_pct||0)*100)}% del balance)</div>
-          <div style="font-weight:600;color:${sc}">${ro?`Protegido en USDC (${(d.swing_protected_sol||0).toFixed(3)} SOL → $${(d.swing_usdc||0).toFixed(2)})`:'Manteniendo SOL (risk-on)'}</div>
+          <div style="font-weight:600;color:${sc}">${ro?`Protegido en USDC (${(d.swing_protected_sol||0).toFixed(3)} SOL -> $${(d.swing_usdc||0).toFixed(2)} | valor ahora ${(d.swing_value_sol||0).toFixed(3)} SOL)`:'Manteniendo SOL (risk-on)'}</div>
         </div>
       </div>
-      <div style="font-size:12px;color:var(--muted);margin-top:6px">Operaciones de SOL completadas: <b style="color:var(--text)">${d.swing_trades||0}</b> · Resultado: <b style="color:${spc}">${sp>=0?'+':''}${sp.toFixed(4)} SOL (€${(d.swing_pnl_eur||0).toFixed(2)})</b></div>
+      ${ro?`<div style="font-size:12px;color:var(--muted);margin-top:6px">P&L abierto del swing: <b style="color:${openSwingColor}">${openSwing>=0?'+':''}${openSwing.toFixed(4)} SOL (${(d.swing_open_pnl_pct||0).toFixed(2)}%)</b> | recompra SOL si senal >= ${d.swing_enter_score}</div>`:''}
+      <div style="font-size:12px;color:var(--muted);margin-top:6px">Operaciones de SOL completadas: <b style="color:var(--text)">${d.swing_trades||0}</b> | Resultado: <b style="color:${spc}">${sp>=0?'+':''}${sp.toFixed(4)} SOL (EUR ${(d.swing_pnl_eur||0).toFixed(2)})</b> | revisa cada ${Math.round((d.swing_interval||0)/60)}min</div>
     </div>`;
   }
   const llm = '<div id="solExpert"><div class="empty" style="padding:14px">🧠 Generando análisis experto de Solana (puede tardar la primera vez)...</div></div>';
