@@ -937,7 +937,14 @@ class BotEngine:
             protecciones.append("anti-honeypot")
         if config.ENABLE_DEV_ANALYSIS:
             protecciones.append("analisis dev/bundle")
-        protecciones.append(f"anti-rug (top10 max {config.MAX_TOP10_PCT:.0f}%)")
+        effective_top10 = config.MAX_TOP10_PCT
+        if not config.ENABLE_TRADING and config.PAPER_EXPLORATION_MODE:
+            effective_top10 = max(effective_top10, config.PAPER_EXPLORATION_MAX_TOP10_PCT)
+            protecciones.append(
+                f"exploracion PAPER (liq min ${config.PAPER_EXPLORATION_MIN_LIQUIDITY_USD:,.0f}, "
+                f"top10 max {effective_top10:.0f}%; LIVE vuelve a {config.MAX_TOP10_PCT:.0f}%)"
+            )
+        protecciones.append(f"anti-rug (top10 max {effective_top10:.0f}%)")
         bl_count = len(db.get_blacklist())
         protecciones.append(f"lista negra ({bl_count} vetadas)")
         fav_count = len(db.get_favorites())

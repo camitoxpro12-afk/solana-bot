@@ -77,6 +77,11 @@ RETRADE_COOLDOWN_MINUTES = float(os.getenv("RETRADE_COOLDOWN_MINUTES", "45"))  #
 # Esas monedas son las que hacen RUG PULL (un solo duenyo tira todo el supply de golpe).
 # Bajado a 40 tras detectar que TODOS los rugs tenian holders muy concentrados.
 MAX_TOP10_PCT = float(os.getenv("MAX_TOP10_PCT", "40"))
+# En simulacion conviene explorar mas para aprender y medir si hay edge real.
+# Estos limites SOLO se aplican cuando ENABLE_TRADING=false y la moneda es top/trending/favorita.
+PAPER_EXPLORATION_MODE = os.getenv("PAPER_EXPLORATION_MODE", "true").lower() == "true"
+PAPER_EXPLORATION_MIN_LIQUIDITY_USD = float(os.getenv("PAPER_EXPLORATION_MIN_LIQUIDITY_USD", "7000"))
+PAPER_EXPLORATION_MAX_TOP10_PCT = float(os.getenv("PAPER_EXPLORATION_MAX_TOP10_PCT", "55"))
 # Si una posicion se cierra perdiendo mas de este % (rug pull), la moneda va a la LISTA NEGRA
 # y NO se vuelve a comprar jamas (evita re-comprar una moneda que ya te rugeo).
 BLACKLIST_LOSS_PCT = float(os.getenv("BLACKLIST_LOSS_PCT", "50"))

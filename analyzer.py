@@ -322,6 +322,13 @@ async def analyze_token(address: str, news_sentiment: float = 2.5, category: str
     if config.ENABLE_DEV_ANALYSIS:
         dev_flags, _creator_top1 = _analyze_dev(rugcheck)
         risks = list(risks) + dev_flags
+    if (
+        not config.ENABLE_TRADING
+        and config.PAPER_EXPLORATION_MODE
+        and category in ("trending", "top", "favorite")
+        and top10_pct > config.MAX_TOP10_PCT
+    ):
+        risks = list(risks) + [f"Exploracion paper: top10 {top10_pct:.0f}% supera limite live {config.MAX_TOP10_PCT:.0f}%"]
     liq_score = _score_liquidity(float(liquidity_usd))
     vol_mc_score = _score_volume_mc(pair)
     price_trend_score = _score_price_trend(pair)
@@ -389,12 +396,24 @@ def _determine_verdict(
         return "scam", "Mint authority activo - pueden crear tokens infinitos"
     if freeze_score == 0.0:
         return "scam", "Freeze authority activo - pueden congelar tu wallet"
-    if liquidity < config.MIN_LIQUIDITY_USD:
+
+    paper_exploration = (
+        not config.ENABLE_TRADING
+        and config.PAPER_EXPLORATION_MODE
+        and category in ("trending", "top", "favorite")
+    )
+    min_liquidity = config.MIN_LIQUIDITY_USD
+    max_top10 = config.MAX_TOP10_PCT
+    if paper_exploration:
+        min_liquidity = min(min_liquidity, config.PAPER_EXPLORATION_MIN_LIQUIDITY_USD)
+        max_top10 = max(max_top10, config.PAPER_EXPLORATION_MAX_TOP10_PCT)
+
+    if liquidity < min_liquidity:
         return "skip", f"Liquidez insuficiente: ${liquidity:,.0f}"
     # ANTI-RUG: si el top 10 de wallets posee demasiado supply, pueden tirar el precio
     # a cero de golpe (rug pull). Es la bandera roja #1 segun los datos reales.
-    if top10_pct > config.MAX_TOP10_PCT:
-        return "scam", f"Holders muy concentrados: top 10 posee {top10_pct:.0f}% (max {config.MAX_TOP10_PCT:.0f}%) - riesgo de rug pull"
+    if top10_pct > max_top10:
+        return "scam", f"Holders muy concentrados: top 10 posee {top10_pct:.0f}% (max {max_top10:.0f}%) - riesgo de rug pull"
 
     # Filtros de antiguedad SOLO para tokens nuevos (las trending/top son establecidas)
     if category == "new":
@@ -417,7 +436,10 @@ def _determine_verdict(
             return "skip", f"No esta en tendencia (24h {price_change_24h:+.0f}%, se busca >= +{config.DIP_MIN_24H_RISE:.0f}%)"
         if price_change_1h > config.DIP_MAX_1H:
             return "skip", f"Esperando el retroceso (1h {price_change_1h:+.0f}%, se compra cuando baje <= {config.DIP_MAX_1H:.0f}%)"
-        return "buy", f"DIP: subio +{price_change_24h:.0f}% en 24h y ahora retrocede {price_change_1h:+.0f}% en 1h - comprando la bajada"
+        note = ""
+        if paper_exploration and top10_pct > config.MAX_TOP10_PCT:
+            note = f" | exploracion paper: top10 {top10_pct:.0f}%"
+        return "buy", f"DIP: subio +{price_change_24h:.0f}% en 24h y ahora retrocede {price_change_1h:+.0f}% en 1h - comprando la bajada{note}"
 
     # === ESTRATEGIA "MOMENTUM" (anterior): comprar cuando sube ===
     min_score = config.MIN_SCORE if category == "new" else config.MIN_SCORE_TRENDING
