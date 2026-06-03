@@ -88,7 +88,10 @@ SCAN_NEW = os.getenv("SCAN_NEW", "false").lower() == "true"          # recien cr
 SCAN_TRENDING = os.getenv("SCAN_TRENDING", "true").lower() == "true"  # en tendencia (de moda)
 SCAN_TOP = os.getenv("SCAN_TOP", "true").lower() == "true"            # top por volumen 24h
 SCAN_PUMPFUN_TOP = os.getenv("SCAN_PUMPFUN_TOP", "false").lower() == "true"  # pump.fun top aun trae mucho spam
-RESCAN_TRENDING_MINUTES = int(os.getenv("RESCAN_TRENDING_MINUTES", "7"))  # re-evaluar trending cada X min
+SCAN_DEXSCREENER_BOOSTS = os.getenv("SCAN_DEXSCREENER_BOOSTS", "true").lower() == "true"
+SCAN_DEXSCREENER_COMMUNITY = os.getenv("SCAN_DEXSCREENER_COMMUNITY", "true").lower() == "true"
+SCAN_BIRDEYE_TRENDING = os.getenv("SCAN_BIRDEYE_TRENDING", "true").lower() == "true"
+RESCAN_TRENDING_MINUTES = int(os.getenv("RESCAN_TRENDING_MINUTES", "4"))  # re-evaluar trending cada X min
 
 # Prefiltro rapido del escaner: evita gastar RugCheck/IA en tokens sin mercado real.
 SCAN_MIN_LIQUIDITY_USD = float(os.getenv("SCAN_MIN_LIQUIDITY_USD", "10000"))

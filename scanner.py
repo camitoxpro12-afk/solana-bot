@@ -64,19 +64,19 @@ def _passes_market_prefilter(token: Dict) -> tuple[bool, str]:
     m = token.get("metrics") or {}
     if not m:
         return True, ""
-    if m.get("liquidity_usd", 0) < config.SCAN_MIN_LIQUIDITY_USD:
+    if "liquidity_usd" in m and m.get("liquidity_usd", 0) < config.SCAN_MIN_LIQUIDITY_USD:
         return False, f"liquidez ${m.get('liquidity_usd', 0):,.0f}"
-    if m.get("volume_1h", 0) < config.SCAN_MIN_VOLUME_1H_USD:
+    if "volume_1h" in m and m.get("volume_1h", 0) < config.SCAN_MIN_VOLUME_1H_USD:
         return False, f"volumen 1h ${m.get('volume_1h', 0):,.0f}"
-    if m.get("txns_1h", 0) < config.SCAN_MIN_TXNS_1H:
+    if "txns_1h" in m and m.get("txns_1h", 0) < config.SCAN_MIN_TXNS_1H:
         return False, f"pocas transacciones 1h ({m.get('txns_1h', 0)})"
-    if m.get("change_24h", 0) < config.SCAN_MIN_24H_CHANGE_PCT:
+    if "change_24h" in m and m.get("change_24h", 0) < config.SCAN_MIN_24H_CHANGE_PCT:
         return False, f"24h {m.get('change_24h', 0):+.0f}%"
-    if m.get("change_6h", 0) < config.SCAN_MIN_6H_CHANGE_PCT:
+    if "change_6h" in m and m.get("change_6h", 0) < config.SCAN_MIN_6H_CHANGE_PCT:
         return False, f"6h {m.get('change_6h', 0):+.0f}%"
-    if m.get("change_1h", 0) > config.SCAN_MAX_1H_CHANGE_PCT:
+    if "change_1h" in m and m.get("change_1h", 0) > config.SCAN_MAX_1H_CHANGE_PCT:
         return False, f"1h +{m.get('change_1h', 0):.0f}% (pump demasiado vertical)"
-    if m.get("buy_ratio_1h", 0) < config.SCAN_MIN_BUY_RATIO_1H:
+    if "buy_ratio_1h" in m and m.get("buy_ratio_1h", 0) < config.SCAN_MIN_BUY_RATIO_1H:
         return False, f"presion compradora baja ({m.get('buy_ratio_1h', 0)*100:.0f}%)"
     return True, ""
 
@@ -185,6 +185,90 @@ async def _fetch_top() -> List[Dict]:
     return await _fetch_geckoterminal("pools?sort=h24_volume_usd_desc", "top")
 
 
+async def _fetch_dexscreener_list(path: str, category: str, source: str) -> List[Dict]:
+    """Listas publicas de DexScreener: boosts y community takeovers.
+    Son senales de descubrimiento, no de compra: pasan por RugCheck/Dex/IA igual."""
+    try:
+        async with httpx.AsyncClient(timeout=8) as client:
+            r = await client.get(
+                f"{config.DEXSCREENER_URL}/{path}",
+                headers={"Accept": "application/json", "User-Agent": "Mozilla/5.0"},
+            )
+            if r.status_code == 200:
+                data = r.json() if isinstance(r.json(), list) else []
+                return [
+                    {
+                        "address": t.get("tokenAddress", ""),
+                        "name": (t.get("description") or t.get("url") or "")[:40],
+                        "symbol": "",
+                        "source": source,
+                        "category": category,
+                        "created_at_ms": 0,
+                    }
+                    for t in data[:40]
+                    if t.get("chainId") == "solana" and t.get("tokenAddress")
+                ]
+    except Exception as e:
+        add_log("WARNING", f"Error fetch DexScreener {path}: {e}")
+    return []
+
+
+async def _fetch_dexscreener_boosts() -> List[Dict]:
+    latest, top = await asyncio.gather(
+        _fetch_dexscreener_list("token-boosts/latest/v1", "trending", "dexscreener-boost-latest"),
+        _fetch_dexscreener_list("token-boosts/top/v1", "top", "dexscreener-boost-top"),
+        return_exceptions=True,
+    )
+    out = []
+    for res in (latest, top):
+        if isinstance(res, list):
+            out.extend(res)
+    return out
+
+
+async def _fetch_dexscreener_community() -> List[Dict]:
+    return await _fetch_dexscreener_list(
+        "community-takeovers/latest/v1", "trending", "dexscreener-community"
+    )
+
+
+async def _fetch_birdeye_trending() -> List[Dict]:
+    """Trending de Birdeye. Requiere key; si no hay key, no hace nada."""
+    if not (config.BIRDEYE_API_KEY and config.SCAN_BIRDEYE_TRENDING):
+        return []
+    out = []
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            for interval in ("1h", "4h", "24h"):
+                r = await client.get(
+                    f"{config.BIRDEYE_BASE_URL}/defi/token_trending",
+                    params={"sort_by": "rank", "sort_type": "asc", "interval": interval, "offset": 0, "limit": 20},
+                    headers={"Accept": "application/json", "X-API-KEY": config.BIRDEYE_API_KEY, "x-chain": "solana"},
+                )
+                if r.status_code != 200:
+                    continue
+                tokens = ((r.json() or {}).get("data") or {}).get("tokens") or []
+                for t in tokens:
+                    addr = t.get("address", "")
+                    if not addr or addr in _SKIP_MINTS:
+                        continue
+                    out.append({
+                        "address": addr,
+                        "name": t.get("name", ""),
+                        "symbol": t.get("symbol", ""),
+                        "source": f"birdeye-{interval}",
+                        "category": "trending",
+                        "created_at_ms": 0,
+                        "metrics": {
+                            "liquidity_usd": _num(t.get("liquidity")),
+                            "volume_24h": _num(t.get("volume24hUSD") or t.get("volumeUSD")),
+                        },
+                    })
+    except Exception as e:
+        add_log("WARNING", f"Error fetch Birdeye trending: {e}")
+    return out
+
+
 async def _fetch_pumpfun_top() -> List[Dict]:
     """Tokens de pump.fun mas grandes por market cap (menos spam que los nuevos)."""
     try:
@@ -223,6 +307,12 @@ async def scan_new_tokens(
         fetchers.append(_fetch_trending())
     if config.SCAN_TOP:
         fetchers.append(_fetch_top())
+    if config.SCAN_DEXSCREENER_BOOSTS:
+        fetchers.append(_fetch_dexscreener_boosts())
+    if config.SCAN_DEXSCREENER_COMMUNITY:
+        fetchers.append(_fetch_dexscreener_community())
+    if config.SCAN_BIRDEYE_TRENDING and config.BIRDEYE_API_KEY:
+        fetchers.append(_fetch_birdeye_trending())
     if config.SCAN_PUMPFUN_TOP:
         fetchers.append(_fetch_pumpfun_top())
     if config.SCAN_NEW:
