@@ -178,10 +178,14 @@ TOKEN_RECENT_HOURS = float(os.getenv("TOKEN_RECENT_HOURS", "24"))
 TOKEN_MAX_RECENT_LOSSES = int(os.getenv("TOKEN_MAX_RECENT_LOSSES", "2"))
 TOKEN_MIN_RECENT_WIN_RATE = float(os.getenv("TOKEN_MIN_RECENT_WIN_RATE", "35"))
 TOKEN_MIN_RECENT_AVG_PNL_PCT = float(os.getenv("TOKEN_MIN_RECENT_AVG_PNL_PCT", "-0.2"))
-ENABLE_TRADING = os.getenv("ENABLE_TRADING", "true").lower() == "true"
+ENABLE_TRADING = os.getenv("ENABLE_TRADING", "false").lower() == "true"
 # Balance virtual inicial en modo simulacion (paper). En modo real usa el de la wallet.
 PAPER_START_EUR = float(os.getenv("PAPER_START_EUR", "50"))
 PAPER_SOL_PRICE_USD = float(os.getenv("PAPER_SOL_PRICE_USD", "80"))
+# La simulacion debe parecerse al mercado ejecutable. Si esta activo, paper usa
+# Jupiter quotes para estimar tokens recibidos y SOL recuperable al vender.
+PAPER_USE_JUPITER_QUOTES = os.getenv("PAPER_USE_JUPITER_QUOTES", "true").lower() == "true"
+PAPER_MAX_PNL_PCT = float(os.getenv("PAPER_MAX_PNL_PCT", "300"))
 
 # === ESTRATEGIA DE SALIDA AVANZADA ===
 # Take-profit parcial: vende una fraccion al llegar a Nx para recuperar capital
@@ -221,6 +225,7 @@ SOL_SWING_INTERVAL = int(os.getenv("SOL_SWING_INTERVAL", "300"))         # revis
 # Aprendizaje: ignora micro-resultados porque no son senal real (slippage/ruido).
 LEARNING_MIN_TRADES = int(os.getenv("LEARNING_MIN_TRADES", "8"))
 LEARNING_MIN_ABS_PNL_PCT = float(os.getenv("LEARNING_MIN_ABS_PNL_PCT", "1.0"))
+LEARNING_MAX_ABS_PNL_PCT = float(os.getenv("LEARNING_MAX_ABS_PNL_PCT", "200"))
 LEARNING_WINDOW_TRADES = int(os.getenv("LEARNING_WINDOW_TRADES", "100"))
 LEARNING_RATE = float(os.getenv("LEARNING_RATE", "0.05"))
 

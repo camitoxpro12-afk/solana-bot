@@ -573,12 +573,19 @@ class BotEngine:
             await self.broadcast_log("WARNING", f"Venta parcial fallida en {pos['token_symbol']} - se reintenta")
             return
 
-        # Calcula precio de venta real si tenemos SOL recibido
         sell_price = current_price
-        if sol_received > 0 and sell_tokens > 0:
-            sol_usd, _ = await self.get_sol_prices()
-            if sol_usd > 0:
-                sell_price = (sol_received / sell_tokens) * sol_usd
+        sold_sol = pos["amount_sol"] * fraction
+        if sol_received > 0 and sold_sol > 0:
+            pnl_pct = (sol_received - sold_sol) / sold_sol * 100
+            if (not config.ENABLE_TRADING and config.PAPER_USE_JUPITER_QUOTES
+                    and abs(pnl_pct) > config.PAPER_MAX_PNL_PCT):
+                await self.broadcast_log(
+                    "WARNING",
+                    f"[PAPER] Bloqueado outlier en venta parcial {pos['token_symbol']}: "
+                    f"{pnl_pct:+.1f}% supera {config.PAPER_MAX_PNL_PCT:.0f}%"
+                )
+                return
+            sell_price = buy_price * (1 + pnl_pct / 100.0)
 
         # Mueve el stop del resto a breakeven (precio de compra): el resto ya es "gratis"
         new_stop = max(pos["stop_price_usd"], buy_price)
@@ -616,8 +623,16 @@ class BotEngine:
 
         sell_price = current_price
         if success and sol_received > 0 and pos["amount_sol"] > 0:
-            sol_usd, _ = await self.get_sol_prices()
-            sell_price = (sol_received / pos["amount_tokens"]) * sol_usd if pos["amount_tokens"] > 0 else current_price
+            pnl_pct = ((sol_received - pos["amount_sol"]) / pos["amount_sol"] * 100)
+            if (not config.ENABLE_TRADING and config.PAPER_USE_JUPITER_QUOTES
+                    and abs(pnl_pct) > config.PAPER_MAX_PNL_PCT):
+                await self.broadcast_log(
+                    "WARNING",
+                    f"[PAPER] Bloqueado outlier en cierre {pos['token_symbol']}: "
+                    f"{pnl_pct:+.1f}% supera {config.PAPER_MAX_PNL_PCT:.0f}%"
+                )
+                return
+            sell_price = pos["buy_price_usd"] * (1 + pnl_pct / 100.0)
 
         result = db.close_position(pos["id"], sell_price, reason)
         if result:

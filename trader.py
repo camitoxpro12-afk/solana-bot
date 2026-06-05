@@ -133,13 +133,25 @@ async def buy_token(
     Buy a token with SOL via Jupiter.
     Returns (success, tokens_received, price_usd, tx_signature)
     """
+    lamports = int(sol_amount * 1e9)
+
     if not config.ENABLE_TRADING:
         add_log("INFO", f"[PAPER] Simulando compra de {token_address} por {sol_amount:.4f} SOL")
-        # price_usd=0.0 -> on_buy_signal usa el precio REAL de mercado como entrada,
-        # asi la simulacion (y el aprendizaje) trabajan con datos reales.
+        if config.PAPER_USE_JUPITER_QUOTES:
+            quote = await get_jupiter_quote(config.SOL_MINT, token_address, lamports)
+            out_amount = int((quote or {}).get("outAmount", 0) or 0)
+            if out_amount <= 0:
+                add_log("WARNING", f"[PAPER] Sin quote Jupiter para compra simulada {token_address}")
+                return False, 0.0, 0.0, ""
+            impact_pct = _price_impact_pct(quote)
+            if impact_pct > config.MAX_PRICE_IMPACT_PCT:
+                add_log("WARNING", f"[PAPER] Impacto compra alto ({impact_pct:.1f}%) - no simulo compra")
+                return False, 0.0, 0.0, ""
+            # Mantener la unidad lamports evita asumir decimals del token.
+            return True, float(out_amount), 0.0, "paper_trade_buy"
+        # Respaldo antiguo si Jupiter esta desactivado para paper.
         return True, sol_amount * 1_000_000, 0.0, "paper_trade_buy"
 
-    lamports = int(sol_amount * 1e9)
     public_key = wallet.get_public_key_str()
 
     for attempt in range(max_retries):
@@ -200,8 +212,16 @@ async def sell_token(
     """
     if not config.ENABLE_TRADING:
         add_log("INFO", f"[PAPER] Simulando venta de {token_amount:.0f} tokens de {token_address}")
-        # sol_received=0.0 -> el cierre usa el precio REAL actual como precio de venta,
-        # de modo que el P&L simulado refleja el movimiento real del mercado.
+        if config.PAPER_USE_JUPITER_QUOTES:
+            token_lamports = int(token_amount)
+            if token_lamports <= 0:
+                return False, 0.0, ""
+            quote = await get_jupiter_quote(token_address, config.SOL_MINT, token_lamports)
+            out_lamports = int((quote or {}).get("outAmount", 0) or 0)
+            if out_lamports <= 0:
+                add_log("WARNING", f"[PAPER] Sin quote Jupiter para venta simulada {token_address}")
+                return False, 0.0, ""
+            return True, out_lamports / 1e9, "paper_trade_sell"
         return True, 0.0, "paper_trade_sell"
 
     token_lamports = int(token_amount * (10 ** decimals))

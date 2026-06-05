@@ -27,7 +27,9 @@ def run_learning_cycle() -> Dict[str, float]:
     raw_trades = get_recent_trades_for_learning(config.LEARNING_WINDOW_TRADES)
     trades = [
         t for t in raw_trades
-        if abs(float(t.get("pnl_pct", 0) or 0)) >= config.LEARNING_MIN_ABS_PNL_PCT
+        if config.LEARNING_MIN_ABS_PNL_PCT
+        <= abs(float(t.get("pnl_pct", 0) or 0))
+        <= config.LEARNING_MAX_ABS_PNL_PCT
     ]
     if len(trades) < config.LEARNING_MIN_TRADES:
         return get_weights()
@@ -112,11 +114,17 @@ def get_learning_summary() -> Dict:
     trades = get_trades(config.LEARNING_WINDOW_TRADES)
     signal_trades = [
         t for t in trades
-        if abs(float(t.get("pnl_pct", 0) or 0)) >= config.LEARNING_MIN_ABS_PNL_PCT
+        if config.LEARNING_MIN_ABS_PNL_PCT
+        <= abs(float(t.get("pnl_pct", 0) or 0))
+        <= config.LEARNING_MAX_ABS_PNL_PCT
     ]
 
-    profitable = [t for t in trades if t.get("pnl_sol", 0) > 0]
-    losing = [t for t in trades if t.get("pnl_sol", 0) <= 0]
+    clean_trades = [
+        t for t in trades
+        if abs(float(t.get("pnl_pct", 0) or 0)) <= config.LEARNING_MAX_ABS_PNL_PCT
+    ]
+    profitable = [t for t in clean_trades if t.get("pnl_sol", 0) > 0]
+    losing = [t for t in clean_trades if t.get("pnl_sol", 0) <= 0]
 
     # Find best and worst factors by weight
     sorted_w = sorted(weights.items(), key=lambda x: x[1], reverse=True)
@@ -127,9 +135,10 @@ def get_learning_summary() -> Dict:
     avg_loss = sum(t.get("pnl_pct", 0) for t in losing) / len(losing) if losing else 0
 
     return {
-        "total_trades": len(trades),
+        "total_trades": len(clean_trades),
         "signal_trades": len(signal_trades),
         "min_abs_pnl_pct": config.LEARNING_MIN_ABS_PNL_PCT,
+        "max_abs_pnl_pct": config.LEARNING_MAX_ABS_PNL_PCT,
         "window_trades": config.LEARNING_WINDOW_TRADES,
         "learning_rate": config.LEARNING_RATE,
         "wins": len(profitable),
