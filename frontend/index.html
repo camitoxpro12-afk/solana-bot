@@ -511,8 +511,9 @@ function renderTrades(trades) {
   if (!trades.length) { c.innerHTML = '<div class="empty">Sin trades aun</div>'; return; }
   c.innerHTML = trades.map(t => {
     const pnl = t.pnl_pct || 0;
+    const parts = t.exit_count && t.exit_count > 1 ? ` · ${t.exit_count} salidas` : '';
     return `<div class="trade-row">
-      <div><div class="tname">${escapeHtml(t.token_symbol||'?')}</div><div style="color:var(--muted);font-size:11px">${reasonLabel(t.outcome)} · ${timeAgo(t.sell_time)}</div></div>
+      <div><div class="tname">${escapeHtml(t.token_symbol||'?')}</div><div style="color:var(--muted);font-size:11px">${reasonLabel(t.outcome)}${parts} · ${timeAgo(t.sell_time)}</div></div>
       <div style="text-align:right"><div class="${pnl>=0?'value green':'value red'}" style="font-size:14px">${pnl>=0?'+':''}${pnl.toFixed(1)}%</div>
       <div style="color:var(--muted);font-size:11px">${(t.pnl_sol||0).toFixed(4)} SOL</div></div>
     </div>`;
@@ -524,7 +525,7 @@ function flashTrade(d) {
 }
 
 async function loadPositions() { renderPositions(await (await fetch('/api/positions')).json()); }
-async function loadTrades() { renderTrades(await (await fetch('/api/trades?limit=20')).json()); }
+async function loadTrades() { renderTrades(await (await fetch('/api/trades/summary?limit=20')).json()); }
 
 async function loadLearning() {
   const d = await (await fetch('/api/learning')).json();

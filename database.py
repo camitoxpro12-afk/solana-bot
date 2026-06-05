@@ -316,6 +316,48 @@ def get_trades(limit: int = 50) -> List[Dict]:
     return [dict(r) for r in rows]
 
 
+def get_trade_summaries(limit: int = 50) -> List[Dict]:
+    """Historial agrupado por posicion: una compra puede tener TP parcial + cierre final."""
+    with get_conn() as conn:
+        rows = conn.execute(
+            """SELECT
+                   token_address, token_name, token_symbol, buy_time,
+                   MIN(buy_price_usd) AS buy_price_usd,
+                   MAX(sell_time) AS sell_time,
+                   SUM(amount_sol) AS amount_sol,
+                   SUM(pnl_sol) AS pnl_sol,
+                   COUNT(*) AS exit_count,
+                   GROUP_CONCAT(outcome, ',') AS outcomes
+               FROM trades
+               GROUP BY token_address, buy_time
+               ORDER BY MAX(sell_time) DESC
+               LIMIT ?""",
+            (limit,)
+        ).fetchall()
+
+        summaries = []
+        for row in rows:
+            d = dict(row)
+            amount = d.get("amount_sol") or 0
+            pnl = d.get("pnl_sol") or 0
+            d["pnl_pct"] = (pnl / amount * 100) if amount > 0 else 0.0
+            d["outcome"] = _summary_outcome(d.get("outcomes") or "", pnl)
+            d["parts"] = [
+                part for part in (d.get("outcomes") or "").split(",") if part
+            ]
+            summaries.append(d)
+        return summaries
+
+
+def _summary_outcome(outcomes: str, pnl_sol: float) -> str:
+    parts = [p for p in outcomes.split(",") if p]
+    if "sol_swing" in parts:
+        return "sol_swing"
+    if len(parts) > 1:
+        return "profit" if pnl_sol >= 0 else "loss"
+    return parts[0] if parts else ("profit" if pnl_sol >= 0 else "loss")
+
+
 def minutes_since_last_trade(token_address: str) -> Optional[float]:
     """Minutos desde el ultimo cierre de este token, o None si nunca se opero."""
     with get_conn() as conn:

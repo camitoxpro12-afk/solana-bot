@@ -1062,6 +1062,11 @@ async def get_trades(limit: int = 50):
     return db.get_trades(limit)
 
 
+@app.get("/api/trades/summary")
+async def get_trade_summaries(limit: int = 50):
+    return db.get_trade_summaries(limit)
+
+
 def _compute_exit_plan(p: dict) -> dict:
     """Calcula los niveles de salida de una posicion (para mostrar el plan en el dashboard)."""
     buy = p.get("buy_price_usd") or 0
@@ -1390,7 +1395,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 "status": await bot.get_status(),
                 "logs": db.get_recent_logs(50),
                 "positions": db.get_open_positions(),
-                "trades": db.get_trades(20),
+                "trades": db.get_trade_summaries(20),
                 "tokens": db.get_recent_tokens(30),
             }
         }))
