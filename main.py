@@ -315,15 +315,28 @@ class BotEngine:
         # ── FILTRO DE MERCADO: no comprar memecoins si SOL esta bajista ────
         # Evita churn: recomprar la misma moneda minutos despues suele producir
         # micro-ganancias/perdidas y mucho ruido. Espera a que arme otra estructura.
-        last_trade_min = db.minutes_since_last_trade(analysis.address)
-        if last_trade_min is not None and last_trade_min < config.RETRADE_COOLDOWN_MINUTES:
-            wait = config.RETRADE_COOLDOWN_MINUTES - last_trade_min
+        # Tope de operaciones por moneda al dia (evita martillear la misma, tipo Hunterius x9)
+        if db.get_token_positions_today(analysis.address) >= config.MAX_TRADES_PER_TOKEN_DAY:
             await self.broadcast_log(
                 "INFO",
-                f"Cooldown {analysis.symbol}: ultimo trade hace {last_trade_min:.0f}min, "
-                f"espero {wait:.0f}min antes de recomprar"
+                f"{analysis.symbol}: tope de {config.MAX_TRADES_PER_TOKEN_DAY} operaciones/dia alcanzado - no recompro hoy"
             )
             return
+        # Cooldown ASIMETRICO: si la ultima posicion de esta moneda PERDIO, espera mucho mas.
+        last_trade_min = db.minutes_since_last_trade(analysis.address)
+        if last_trade_min is not None:
+            last_pnl = db.last_position_pnl_sol(analysis.address)
+            after_loss = last_pnl is not None and last_pnl < 0
+            cooldown = config.RETRADE_LOSS_COOLDOWN_MINUTES if after_loss else config.RETRADE_COOLDOWN_MINUTES
+            if last_trade_min < cooldown:
+                wait = cooldown - last_trade_min
+                tag = " (tras perdida)" if after_loss else ""
+                await self.broadcast_log(
+                    "INFO",
+                    f"Cooldown {analysis.symbol}{tag}: ultimo trade hace {last_trade_min:.0f}min, "
+                    f"espero {wait:.0f}min antes de recomprar"
+                )
+                return
 
         token_stats = db.get_token_recent_stats(analysis.address, config.TOKEN_RECENT_HOURS)
         if self._token_recently_bad(token_stats):
@@ -673,6 +686,13 @@ class BotEngine:
                 await self.broadcast_log(
                     "INFO",
                     f"⭐ {pos['token_symbol']} guardada como FAVORITA (gano {pnl_pct:+.0f}%) - se vigilara para re-entrar"
+                )
+            # PERDEDORA que era favorita: degradarla (deja de tener trato preferente).
+            elif pnl_pct < 0 and db.is_favorite(pos["token_address"]):
+                db.remove_favorite(pos["token_address"])
+                await self.broadcast_log(
+                    "INFO",
+                    f"⭐❌ {pos['token_symbol']} sale de favoritas (cerro en {pnl_pct:+.0f}%)"
                 )
 
             # Trigger learning after each trade

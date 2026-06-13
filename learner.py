@@ -25,70 +25,61 @@ def run_learning_cycle() -> Dict[str, float]:
     Returns updated weights.
     """
     raw_trades = get_recent_trades_for_learning(config.LEARNING_WINDOW_TRADES)
-    trades = [
-        t for t in raw_trades
-        if config.LEARNING_MIN_ABS_PNL_PCT
-        <= abs(float(t.get("pnl_pct", 0) or 0))
-        <= config.LEARNING_MAX_ABS_PNL_PCT
-    ]
-    if len(trades) < config.LEARNING_MIN_TRADES:
-        return get_weights()
 
-    # Parse scores and outcomes
-    outcomes = []
-    factor_scores = {}
-
-    for trade in trades:
-        pnl = trade.get("pnl_pct", 0) or 0
-        outcomes.append(max(-20.0, min(20.0, pnl)))
-
-        scores_raw = trade.get("scores")
+    # Matriz ALINEADA: cada muestra aporta su pnl Y sus scores JUNTOS (antes el pnl de
+    # un trade se emparejaba con los scores de OTRO al saltarse filas sin scores).
+    # Se excluyen swing y parciales (scores vacios / duplicados) y micro/outliers.
+    samples = []  # lista de (pnl_clamped, scores_dict)
+    for t in raw_trades:
+        if (t.get("outcome") or "") in ("sol_swing", "partial_tp"):
+            continue
+        pnl = float(t.get("pnl_pct", 0) or 0)
+        if not (config.LEARNING_MIN_ABS_PNL_PCT <= abs(pnl) <= config.LEARNING_MAX_ABS_PNL_PCT):
+            continue
+        scores_raw = t.get("scores")
         if not scores_raw:
             continue
         try:
             scores = json.loads(scores_raw) if isinstance(scores_raw, str) else scores_raw
-            for factor, score in scores.items():
-                if factor == "total":
-                    continue
-                if factor not in factor_scores:
-                    factor_scores[factor] = []
-                factor_scores[factor].append(float(score) if score else 0.0)
         except Exception:
-            pass
+            continue
+        if not isinstance(scores, dict) or not scores:
+            continue
+        samples.append((max(-20.0, min(20.0, pnl)), scores))
 
-    if not factor_scores or len(outcomes) < config.LEARNING_MIN_TRADES:
+    # CONGELADO: con pocos datos limpios el "aprendizaje" es ruido que rompe el scoring.
+    # Mejor dejar los pesos en 1.0 hasta tener una muestra de verdad.
+    if len(samples) < config.LEARNING_MIN_CLEAN_TRADES:
         return get_weights()
 
-    outcomes_arr = np.array(outcomes, dtype=float)
+    factors = set()
+    for _, sc in samples:
+        factors.update(k for k in sc.keys() if k != "total")
+
     current_weights = get_weights()
     new_weights = dict(current_weights)
 
     adjustments = {}
-    for factor, scores_list in factor_scores.items():
-        if len(scores_list) < config.LEARNING_MIN_TRADES:
+    for factor in factors:
+        # Pares (score, pnl) de la MISMA muestra -> alineacion correcta.
+        pairs = [(sc.get(factor), pnl) for pnl, sc in samples if sc.get(factor) is not None]
+        if len(pairs) < config.LEARNING_MIN_SAMPLES_PER_FACTOR:
             continue
-
-        # Pad/truncate to same length
-        n = min(len(scores_list), len(outcomes_arr))
-        s = np.array(scores_list[:n], dtype=float)
-        o = outcomes_arr[:n]
-
+        s = np.array([float(p[0]) for p in pairs], dtype=float)
+        o = np.array([float(p[1]) for p in pairs], dtype=float)
         if s.std() < 0.01:
             continue  # No variance = no signal
 
-        # Pearson correlation between factor scores and trade outcomes
         corr = np.corrcoef(s, o)[0, 1]
-        if np.isnan(corr):
+        # Solo ajustar si la correlacion es SIGNIFICATIVA (no ruido espurio).
+        if np.isnan(corr) or abs(corr) < config.LEARNING_MIN_CORR:
             continue
 
-        # Positive correlation -> factor predicts profit -> increase weight
-        # Negative correlation -> factor predicts loss -> decrease weight
         adjustment = 1.0 + (corr * config.LEARNING_RATE)
         adjustment = max(1.0 - config.LEARNING_RATE, min(1.0 + config.LEARNING_RATE, adjustment))
 
         old = current_weights.get(factor, 1.0)
-        new = old * adjustment
-        new = max(MIN_WEIGHT, min(MAX_WEIGHT, new))
+        new = max(MIN_WEIGHT, min(MAX_WEIGHT, old * adjustment))
         new_weights[factor] = round(new, 4)
         adjustments[factor] = round(corr, 3)
 

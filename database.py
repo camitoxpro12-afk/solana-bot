@@ -407,19 +407,22 @@ def get_consecutive_losses(limit: int = 5) -> int:
 
 
 def get_token_recent_stats(token_address: str, hours: float = 24) -> Dict:
-    """Resumen de los trades recientes de una moneda para evitar recompras malas."""
+    """Resumen reciente de una moneda AGRUPADO POR POSICION (no por fila).
+    Antes contaba el TP parcial como un trade ganador aparte del cierre, inflando el
+    win-rate al 50% y desactivando el filtro de recompra. Ahora cuenta posiciones."""
     with get_conn() as conn:
         rows = conn.execute(
-            """SELECT pnl_sol, pnl_pct FROM trades
-               WHERE token_address = ?
-                 AND sell_time >= datetime('now', ?)
-               ORDER BY sell_time DESC""",
+            """SELECT SUM(pnl_sol) AS pnl_sol, SUM(amount_sol) AS amount_sol
+               FROM trades
+               WHERE token_address = ? AND sell_time >= datetime('now', ?)
+               GROUP BY buy_time""",
             (token_address, f"-{hours} hours")
         ).fetchall()
     total = len(rows)
     wins = sum(1 for r in rows if (r["pnl_sol"] or 0) > 0)
     losses = total - wins
-    avg = sum((r["pnl_pct"] or 0) for r in rows) / total if total else 0.0
+    pcts = [((r["pnl_sol"] or 0) / r["amount_sol"] * 100) for r in rows if (r["amount_sol"] or 0) > 0]
+    avg = sum(pcts) / len(pcts) if pcts else 0.0
     return {
         "trades": total,
         "wins": wins,
@@ -427,6 +430,32 @@ def get_token_recent_stats(token_address: str, hours: float = 24) -> Dict:
         "win_rate": (wins / total * 100) if total else 0.0,
         "avg_pnl_pct": avg,
     }
+
+
+def last_position_pnl_sol(token_address: str) -> Optional[float]:
+    """P&L (SOL) de la ULTIMA posicion cerrada de esa moneda (agrupando parciales)."""
+    with get_conn() as conn:
+        row = conn.execute(
+            """SELECT SUM(pnl_sol) AS pnl_sol FROM trades
+               WHERE token_address = ? AND buy_time = (
+                   SELECT buy_time FROM trades WHERE token_address = ?
+                   ORDER BY sell_time DESC LIMIT 1)""",
+            (token_address, token_address)
+        ).fetchone()
+    if not row or row["pnl_sol"] is None:
+        return None
+    return float(row["pnl_sol"])
+
+
+def get_token_positions_today(token_address: str) -> int:
+    """Cuantas posiciones (no filas) de esta moneda se han cerrado hoy."""
+    with get_conn() as conn:
+        row = conn.execute(
+            """SELECT COUNT(DISTINCT buy_time) FROM trades
+               WHERE token_address = ? AND date(sell_time) = date('now')""",
+            (token_address,)
+        ).fetchone()
+    return int(row[0] or 0) if row else 0
 
 
 def get_daily_pnl() -> float:

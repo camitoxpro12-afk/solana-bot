@@ -501,19 +501,28 @@ async def llm_review(analysis, log_fn=None) -> Optional[Dict[str, Any]]:
 
 # ── Analisis experto de Solana (provider-aware) ─────────────────────────────────
 
-def _extract_tagged_json(text: str, tag: str) -> Optional[Dict]:
+def _extract_tagged_json(text: str, tag: str, required_key: Optional[str] = None) -> Optional[Dict]:
+    """Extrae el JSON del plan. Primero el bloque <tag>...</tag>; si no, objetos JSON
+    PLANOS (del ultimo al primero, que suele ser el final, no el borrador del razonamiento).
+    Si se pide required_key, RECHAZA cualquier dict que no la tenga (evita aceptar un
+    JSON intermedio o un '{}' suelto como si fuera una decision de trading)."""
     candidates = []
     m = re.search(rf"<{tag}>\s*(\{{.*?\}})\s*</{tag}>", text, re.DOTALL)
     if m:
         candidates.append(m.group(1))
-    m2 = re.search(r"\{.*\}", text, re.DOTALL)
-    if m2:
-        candidates.append(m2.group(0))
+    # Fallback: objetos planos {...} sin anidar, en orden inverso (el ultimo = el final).
+    flat = re.findall(r"\{[^{}]*\}", text, re.DOTALL)
+    candidates.extend(reversed(flat))
     for c in candidates:
         try:
-            return json.loads(c)
+            data = json.loads(c)
         except json.JSONDecodeError:
             continue
+        if not isinstance(data, dict):
+            continue
+        if required_key and required_key not in data:
+            continue
+        return data
     return None
 
 
@@ -826,7 +835,7 @@ async def exit_review(pos: Dict, log_fn=None, market: Optional[Dict] = None) -> 
     text = await _ask_llm(EXIT_SYSTEM, msg, log_fn, max_tokens=3000, role="exit")
     if not text:
         return None
-    data = _extract_tagged_json(text, "exit")
+    data = _extract_tagged_json(text, "exit", required_key="action")
     if not data:
         return None
     data["action"] = "sell" if data.get("action") == "sell" else "hold"

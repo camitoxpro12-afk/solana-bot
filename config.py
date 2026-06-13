@@ -79,6 +79,10 @@ AI_EXIT_MIN_STOP_DISTANCE_PCT = float(os.getenv("AI_EXIT_MIN_STOP_DISTANCE_PCT",
 FAVORITE_MIN_WIN_PCT = float(os.getenv("FAVORITE_MIN_WIN_PCT", "5"))
 FAVORITE_RESCAN_MINUTES = float(os.getenv("FAVORITE_RESCAN_MINUTES", "3"))  # re-analiza favoritas cada X min
 RETRADE_COOLDOWN_MINUTES = float(os.getenv("RETRADE_COOLDOWN_MINUTES", "45"))  # espera antes de recomprar la misma moneda
+# Si la ultima operacion de esa moneda PERDIO, espera mucho mas antes de recomprar
+# (evita martillear la misma moneda en decadencia, como Hunterius x9).
+RETRADE_LOSS_COOLDOWN_MINUTES = float(os.getenv("RETRADE_LOSS_COOLDOWN_MINUTES", "360"))  # 6h tras una perdida
+MAX_TRADES_PER_TOKEN_DAY = int(os.getenv("MAX_TRADES_PER_TOKEN_DAY", "3"))  # tope de operaciones/dia por moneda
 # Concentracion de holders: si el top 10 de wallets posee mas de este % -> RECHAZO DURO.
 # Esas monedas son las que hacen RUG PULL (un solo duenyo tira todo el supply de golpe).
 # Bajado a 40 tras detectar que TODOS los rugs tenian holders muy concentrados.
@@ -99,7 +103,7 @@ SCAN_NEW = os.getenv("SCAN_NEW", "false").lower() == "true"          # recien cr
 SCAN_TRENDING = os.getenv("SCAN_TRENDING", "true").lower() == "true"  # en tendencia (de moda)
 SCAN_TOP = os.getenv("SCAN_TOP", "true").lower() == "true"            # top por volumen 24h
 SCAN_PUMPFUN_TOP = os.getenv("SCAN_PUMPFUN_TOP", "false").lower() == "true"  # pump.fun top aun trae mucho spam
-SCAN_DEXSCREENER_BOOSTS = os.getenv("SCAN_DEXSCREENER_BOOSTS", "true").lower() == "true"
+SCAN_DEXSCREENER_BOOSTS = os.getenv("SCAN_DEXSCREENER_BOOSTS", "false").lower() == "true"  # promo PAGADA = canal clasico de rugs, off
 SCAN_DEXSCREENER_COMMUNITY = os.getenv("SCAN_DEXSCREENER_COMMUNITY", "true").lower() == "true"
 SCAN_BIRDEYE_TRENDING = os.getenv("SCAN_BIRDEYE_TRENDING", "true").lower() == "true"
 RESCAN_TRENDING_MINUTES = int(os.getenv("RESCAN_TRENDING_MINUTES", "4"))  # re-evaluar trending cada X min
@@ -239,6 +243,12 @@ LEARNING_MIN_ABS_PNL_PCT = float(os.getenv("LEARNING_MIN_ABS_PNL_PCT", "1.0"))
 LEARNING_MAX_ABS_PNL_PCT = float(os.getenv("LEARNING_MAX_ABS_PNL_PCT", "200"))
 LEARNING_WINDOW_TRADES = int(os.getenv("LEARNING_WINDOW_TRADES", "100"))
 LEARNING_RATE = float(os.getenv("LEARNING_RATE", "0.05"))
+# CONGELAR los pesos hasta tener suficientes trades LIMPIOS (sin esto, con pocos datos
+# el "aprendizaje" deriva al azar y rompe el scoring). Y solo ajustar un factor si su
+# correlacion es significativa, no ruido.
+LEARNING_MIN_CLEAN_TRADES = int(os.getenv("LEARNING_MIN_CLEAN_TRADES", "60"))
+LEARNING_MIN_CORR = float(os.getenv("LEARNING_MIN_CORR", "0.3"))
+LEARNING_MIN_SAMPLES_PER_FACTOR = int(os.getenv("LEARNING_MIN_SAMPLES_PER_FACTOR", "30"))
 
 # Jupiter API (lite-api = gratis, sin key). La vieja quote-api.jup.ag fue retirada.
 JUPITER_QUOTE_URL = os.getenv("JUPITER_QUOTE_URL", "https://lite-api.jup.ag/swap/v1/quote")
