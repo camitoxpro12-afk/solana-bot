@@ -521,11 +521,11 @@ class BotEngine:
                                 trailing_active = True
 
                         # ── Decidir salida ──
-                        # El objetivo (take-profit) se respeta si la IA gestiona los niveles
-                        # (asi se ejecuta su target al instante) o si no hay trailing.
-                        ai_managed = (config.ENABLE_AI_EXIT and config.ENABLE_AI_DYNAMIC_LEVELS
-                                      and llm_analyst.is_enabled())
-                        take_profit_active = (not config.ENABLE_TRAILING_STOP) or ai_managed
+                        # DEJAR CORRER A LOS GANADORES: con el trailing activo, NO cerramos
+                        # en duro al tocar el objetivo (eso capaba todos los ganadores; cero
+                        # trades pasaban de +25%). El trailing + el TP parcial + la venta de
+                        # la IA gestionan la subida. El objetivo fijo solo cuenta sin trailing.
+                        take_profit_active = not config.ENABLE_TRAILING_STOP
                         target = pos.get("target_price_usd") or 0
                         if take_profit_active and target > 0 and current_price >= target:
                             await self._close_position(pos, current_price, "take_profit")
@@ -845,32 +845,42 @@ class BotEngine:
             return
         tgt_pct = review.get("target_pct")
         stp_pct = review.get("stop_pct")
-        new_target = pos.get("target_price_usd") or 0
-        new_stop = pos.get("stop_price_usd") or 0
+        old_target = pos.get("target_price_usd") or 0
+        old_stop = pos.get("stop_price_usd") or 0
+        new_target = old_target
+        new_stop = old_stop
         pnl_pct = ((cur - buy) / buy * 100) if buy > 0 else 0
 
         if tgt_pct is not None:
             # No aceptar objetivos microscopicos: en real se los comen slippage/fees.
             tgt_pct = max(float(tgt_pct), config.AI_EXIT_MIN_TARGET_PCT)
-            new_target = buy * (1 + tgt_pct / 100.0)
+            cand = buy * (1 + tgt_pct / 100.0)
+            # Un objetivo POR DEBAJO del precio actual no es objetivo, es "vender ya":
+            # NO lo plantamos pegado al precio (eso cerraba runners al primer tick). Si la
+            # IA quiere salir debe usar action=sell. Conservamos el objetivo anterior.
+            if cand > cur * 1.01:
+                new_target = cand
+
         if stp_pct is not None:
             stp_pct = float(stp_pct)
-            # Antes de que el trade tenga ganancia real, no mover el stop a breakeven
-            # por miedo: eso cerraba demasiadas posiciones en +0.0% / +0.3%.
+            # Antes de tener ganancia real, no apretar el stop a breakeven por miedo.
             if pnl_pct < config.AI_EXIT_LOCK_PROFIT_AFTER_PCT:
                 floor = -config.STOP_LOSS_PCT * 100
                 stp_pct = min(max(stp_pct, floor), config.AI_EXIT_EARLY_MAX_STOP_PCT)
-            new_stop = buy * (1 + stp_pct / 100.0)
+            cand = buy * (1 + stp_pct / 100.0)
+            min_dist = config.AI_EXIT_MIN_STOP_DISTANCE_PCT / 100.0
+            if cand >= cur:
+                # stop por encima/igual al precio = salida garantizada por ruido: no aplicar.
+                cand = old_stop
+            elif cand < buy and cand > cur * (1 - min_dist):
+                # stop de PERDIDA demasiado pegado al precio -> alejarlo a distancia minima.
+                cand = cur * (1 - min_dist)
+            # TRINQUETE: nunca bajar un stop que ya protege ganancia (breakeven o mas).
+            if old_stop > 0 and old_stop >= buy and old_stop < cur:
+                cand = max(cand, old_stop)
+            if cand > 0:
+                new_stop = cand
 
-        # Seguridad: el objetivo por encima del precio actual y el stop por debajo
-        # (si la IA quisiera salir ya, deberia usar action=sell, no el plan).
-        new_target = max(new_target, cur * 1.001)
-        new_stop = min(new_stop, cur * 0.999)
-        if new_stop <= 0:
-            new_stop = pos.get("stop_price_usd") or (buy * 0.85)
-
-        old_target = pos.get("target_price_usd") or 0
-        old_stop = pos.get("stop_price_usd") or 0
         # Solo actualiza/loguea si el cambio es significativo (>1%)
         changed = (
             abs(new_target - old_target) > old_target * 0.01 or

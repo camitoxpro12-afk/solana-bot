@@ -147,6 +147,11 @@ async def buy_token(
             if impact_pct > config.MAX_PRICE_IMPACT_PCT:
                 add_log("WARNING", f"[PAPER] Impacto compra alto ({impact_pct:.1f}%) - no simulo compra")
                 return False, 0.0, 0.0, ""
+            # COSTES REALES: el quote ya trae fee de pool + impacto; restamos ademas el
+            # slippage de ejecucion y la priority fee (como fraccion de este trade).
+            cost_frac = (config.PAPER_SLIPPAGE_PCT_PER_SIDE / 100.0
+                         + config.PAPER_PRIORITY_FEE_SOL / max(sol_amount, 1e-9))
+            out_amount = int(out_amount * max(0.0, 1.0 - cost_frac))
             # Mantener la unidad lamports evita asumir decimals del token.
             return True, float(out_amount), 0.0, "paper_trade_buy"
         # Respaldo antiguo si Jupiter esta desactivado para paper.
@@ -221,7 +226,11 @@ async def sell_token(
             if out_lamports <= 0:
                 add_log("WARNING", f"[PAPER] Sin quote Jupiter para venta simulada {token_address}")
                 return False, 0.0, ""
-            return True, out_lamports / 1e9, "paper_trade_sell"
+            proceeds = out_lamports / 1e9
+            # COSTES REALES al vender: slippage de ejecucion + priority fee.
+            cost_frac = (config.PAPER_SLIPPAGE_PCT_PER_SIDE / 100.0
+                         + config.PAPER_PRIORITY_FEE_SOL / max(proceeds, 1e-9))
+            return True, proceeds * max(0.0, 1.0 - cost_frac), "paper_trade_sell"
         return True, 0.0, "paper_trade_sell"
 
     token_lamports = int(token_amount * (10 ** decimals))
@@ -272,9 +281,14 @@ async def swap_sol_to_usdc(sol_amount: float) -> Tuple[bool, float, str]:
     if not config.ENABLE_TRADING:
         price = await get_sol_price_usd()
         if price <= 0:
-            price = config.PAPER_SOL_PRICE_USD
-        add_log("INFO", f"[PAPER] Simulando SOL->USDC: {sol_amount:.4f} SOL -> ${sol_amount*price:.2f}")
-        return True, sol_amount * price, "paper_swap"
+            # NUNCA inventar un precio: abortar y reintentar en el siguiente ciclo.
+            add_log("WARNING", "[PAPER] Sin precio de SOL fiable - swap SOL->USDC abortado")
+            return False, 0.0, ""
+        cost_frac = (config.PAPER_SLIPPAGE_PCT_PER_SIDE / 100.0
+                     + config.PAPER_PRIORITY_FEE_SOL / max(sol_amount, 1e-9))
+        usdc = sol_amount * price * max(0.0, 1.0 - cost_frac)
+        add_log("INFO", f"[PAPER] Simulando SOL->USDC: {sol_amount:.4f} SOL -> ${usdc:.2f} (coste {cost_frac*100:.2f}%)")
+        return True, usdc, "paper_swap"
     ok, usdc_received, _price, sig = await buy_token(config.USDC_MINT, sol_amount)
     return ok, usdc_received, sig
 
@@ -284,9 +298,13 @@ async def swap_usdc_to_sol(usdc_amount: float) -> Tuple[bool, float, str]:
     if not config.ENABLE_TRADING:
         price = await get_sol_price_usd()
         if price <= 0:
-            price = config.PAPER_SOL_PRICE_USD
-        sol = (usdc_amount / price) if price > 0 else 0.0
-        add_log("INFO", f"[PAPER] Simulando USDC->SOL: ${usdc_amount:.2f} -> {sol:.4f} SOL")
+            add_log("WARNING", "[PAPER] Sin precio de SOL fiable - swap USDC->SOL abortado")
+            return False, 0.0, ""
+        sol = usdc_amount / price
+        cost_frac = (config.PAPER_SLIPPAGE_PCT_PER_SIDE / 100.0
+                     + config.PAPER_PRIORITY_FEE_SOL / max(sol, 1e-9))
+        sol *= max(0.0, 1.0 - cost_frac)
+        add_log("INFO", f"[PAPER] Simulando USDC->SOL: ${usdc_amount:.2f} -> {sol:.4f} SOL (coste {cost_frac*100:.2f}%)")
         return True, sol, "paper_swap"
     return await sell_token(config.USDC_MINT, usdc_amount, decimals=6)
 

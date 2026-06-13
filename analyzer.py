@@ -436,6 +436,8 @@ def _determine_verdict(
             return "skip", f"No esta en tendencia (24h {price_change_24h:+.0f}%, se busca >= +{config.DIP_MIN_24H_RISE:.0f}%)"
         if price_change_1h > config.DIP_MAX_1H:
             return "skip", f"Esperando el retroceso (1h {price_change_1h:+.0f}%, se compra cuando baje <= {config.DIP_MAX_1H:.0f}%)"
+        if price_change_1h < config.DIP_MIN_1H:
+            return "skip", f"DUMP en curso, no retroceso (1h {price_change_1h:+.0f}% < {config.DIP_MIN_1H:.0f}%) - no compro cuchillos cayendo"
         note = ""
         if paper_exploration and top10_pct > config.MAX_TOP10_PCT:
             note = f" | exploracion paper: top10 {top10_pct:.0f}%"

@@ -37,6 +37,9 @@ MAX_PUMP_1H_PCT = float(os.getenv("MAX_PUMP_1H_PCT", "60"))
 STRATEGY = os.getenv("STRATEGY", "dip")
 DIP_MIN_24H_RISE = float(os.getenv("DIP_MIN_24H_RISE", "15"))  # la moneda debe haber subido >= X% en 24h
 DIP_MAX_1H = float(os.getenv("DIP_MAX_1H", "-3"))              # y estar bajando <= X% en 1h ahora (el retroceso)
+# SUELO del dip: por debajo de esto NO es un retroceso, es un DUMP en curso (cuchillo cayendo).
+# Sin esto, un -40% en 1h contaba como "dip valido" y comprabamos justo el desplome.
+DIP_MIN_1H = float(os.getenv("DIP_MIN_1H", "-15"))            # no comprar si cae mas de X% en 1h
 
 # Confirmacion de rebote: despues de detectar el dip, espera unos segundos y solo
 # compra si el precio deja de caer y aparece presion compradora. Es la parte que
@@ -66,6 +69,9 @@ AI_EXIT_MIN_TARGET_PCT = float(os.getenv("AI_EXIT_MIN_TARGET_PCT", "8"))        
 AI_EXIT_MIN_SELL_PROFIT_PCT = float(os.getenv("AI_EXIT_MIN_SELL_PROFIT_PCT", "2"))  # venta IA minima si sale en ganancia
 AI_EXIT_LOCK_PROFIT_AFTER_PCT = float(os.getenv("AI_EXIT_LOCK_PROFIT_AFTER_PCT", "4"))  # solo asegurar breakeven tras +4%
 AI_EXIT_EARLY_MAX_STOP_PCT = float(os.getenv("AI_EXIT_EARLY_MAX_STOP_PCT", "-5"))       # antes de +4%, stop no mas apretado que -5%
+# Distancia minima del stop al precio actual: si la IA pide un stop mas pegado, se aleja
+# a esta distancia (un stop a 0.1% del precio = salida garantizada por ruido = churn).
+AI_EXIT_MIN_STOP_DISTANCE_PCT = float(os.getenv("AI_EXIT_MIN_STOP_DISTANCE_PCT", "6"))
 
 # === MONEDAS FAVORITAS (las ganadoras se guardan y re-analizan para volver a entrar) ===
 # Si un trade cierra ganando >= este %, la moneda se guarda como "favorita" y el escaner
@@ -186,6 +192,11 @@ PAPER_SOL_PRICE_USD = float(os.getenv("PAPER_SOL_PRICE_USD", "80"))
 # Jupiter quotes para estimar tokens recibidos y SOL recuperable al vender.
 PAPER_USE_JUPITER_QUOTES = os.getenv("PAPER_USE_JUPITER_QUOTES", "true").lower() == "true"
 PAPER_MAX_PNL_PCT = float(os.getenv("PAPER_MAX_PNL_PCT", "300"))
+# COSTES REALES en la simulacion: el quote de Jupiter ya incluye fee de pool + impacto,
+# pero NO el slippage real de ejecucion ni las priority fees. Sin esto, el paper "gana"
+# y el real pierde. Modelamos un coste por lado para que la simulacion diga la VERDAD.
+PAPER_SLIPPAGE_PCT_PER_SIDE = float(os.getenv("PAPER_SLIPPAGE_PCT_PER_SIDE", "0.5"))  # slippage real vs quote, por lado
+PAPER_PRIORITY_FEE_SOL = float(os.getenv("PAPER_PRIORITY_FEE_SOL", "0.0007"))         # priority fee fija por swap (SOL)
 
 # === ESTRATEGIA DE SALIDA AVANZADA ===
 # Take-profit parcial: vende una fraccion al llegar a Nx para recuperar capital
